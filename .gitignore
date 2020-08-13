@@ -3,3 +3,9 @@
 ################################################################################
 
 /.vs
+/bin/ARM64/Debug
+/obj/ARM64/Debug
+/bin/ARM64/Release
+/obj/ARM64/Release
+/bin/x64
+/obj/x64
