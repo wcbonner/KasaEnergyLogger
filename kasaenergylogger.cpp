@@ -8,13 +8,13 @@
 #include <cstdio>
 #include <ctime>
 #include <csignal>
+#include <string>
 #include <iostream>
 #include <locale>
 #include <queue>
 #include <map>
 #include <vector>
 #include <algorithm>
-#include <locale>
 #include <iomanip>
 #include <fstream>
 #include <sstream>
@@ -161,27 +161,73 @@ public:
 	struct sockaddr address;
 	time_t date;
 	std::string information;
+	std::string GetDeviceID(void) const;
 };
-// This was hobbled together after reading http://support.microsoft.com/kb/156532 and http://www.cplusplus.com/reference/std/functional/equal_to/ and http://www.cplusplus.com/reference/std/functional/bind2nd/
-template <class T> struct NetworkAddressMatches : std::binary_function <T, struct sockaddr, bool> {
-	bool operator() (const T& x, const struct sockaddr& y) const
+std::string CKasaClient::GetDeviceID(void) const
+{
+	std::string DeviceID;
+	std::string devicekey("\"deviceId\"");
+	auto pos = information.find(devicekey);
+	if (pos != std::string::npos)
 	{
-		bool rval = false;
-		if (x.address.sa_family == AF_INET)
+		DeviceID = information.substr(pos);
+		DeviceID = DeviceID.substr(0, DeviceID.find_first_of(",}"));
+	}
+	return(DeviceID);
+}
+/////////////////////////////////////////////////////////////////////////////
+// The following operator was required so I could use the std::map<> to use CKasaClient as the key
+bool operator <(const CKasaClient &a, const CKasaClient &b)
+{
+	std::string AdeviceId(a.GetDeviceID());
+	std::string BdeviceId(b.GetDeviceID());
+	return(AdeviceId.compare(BdeviceId) < 0);
+}
+/////////////////////////////////////////////////////////////////////////////
+std::string LogDirectory("./");
+std::string GenerateLogFileName(const CKasaClient &a)
+{
+	std::ostringstream OutputFilename;
+	OutputFilename << LogDirectory;
+	OutputFilename << "kasa-";
+	// HACK: I need to clean this up..  
+	std::string ID(a.GetDeviceID().substr(a.GetDeviceID().find(':')));
+	ID.erase(ID.find(':'), 1);
+	ID.erase(ID.find('"'), 1);
+	ID.erase(ID.find('"'), 1);
+	OutputFilename << ID;
+	// find device id in "a.information" and append it here
+	time_t timer;
+	time(&timer);
+	struct tm UTC;
+	if (0 != gmtime_r(&timer, &UTC))
+		if (!((UTC.tm_year == 70) && (UTC.tm_mon == 0) && (UTC.tm_mday == 1)))
+			OutputFilename << "-" << std::dec << UTC.tm_year + 1900 << "-" << std::setw(2) << std::setfill('0') << UTC.tm_mon + 1;
+	OutputFilename << ".txt";
+	return(OutputFilename.str());
+}
+bool GenerateLogFile(std::map<CKasaClient, std::queue<std::string>> &KasaMap)
+{
+	bool rval = false;
+	for (auto it = KasaMap.begin(); it != KasaMap.end(); ++it)
+	{
+		if (!it->second.empty()) // Only open the log file if there are entries to add
 		{
-			struct sockaddr_in * a = (struct sockaddr_in*)&(x.address);
-			struct sockaddr_in * b = (struct sockaddr_in*)&(y);
-			rval = a->sin_addr.s_addr == b->sin_addr.s_addr;
+			std::ofstream LogFile(GenerateLogFileName(it->first), std::ios_base::out | std::ios_base::app | std::ios_base::ate);
+			if (LogFile.is_open())
+			{
+				while (!it->second.empty())
+				{
+					LogFile << it->second.front() << std::endl;
+					it->second.pop();
+				}
+				LogFile.close();
+				rval = true;
+			}
 		}
-		return rval;
 	}
-};
-template <class T> struct OlderThan : std::binary_function <T, time_t, bool> {
-	bool operator() (const T& x, const time_t& y) const
-	{
-		return x.date < y;
-	}
-};
+	return(rval);
+}
 /////////////////////////////////////////////////////////////////////////////
 volatile bool bRun = true; // This is declared volatile so that the compiler won't optimize it out of loops later in the code
 void SignalHandlerSIGINT(int signal)
@@ -197,7 +243,6 @@ void SignalHandlerSIGHUP(int signal)
 /////////////////////////////////////////////////////////////////////////////
 int ConsoleVerbosity = 1;
 int LogFileTime = 60;
-std::string LogDirectory("./");
 static void usage(int argc, char **argv)
 {
 	std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
@@ -284,7 +329,8 @@ int main(int argc, char **argv)
 		struct sockaddr_in saServerListen;
 		saServerListen.sin_family = AF_INET;
 		saServerListen.sin_addr.s_addr = INADDR_ANY;
-		saServerListen.sin_port = htons(9999);	// Port number
+		//saServerListen.sin_port = htons(9999);	// Port number
+		saServerListen.sin_port = htons(0);		// Any Port number
 		if (-1 == bind(ServerListenSocket,		// Socket descriptor
 				(sockaddr*)&saServerListen,		// Address to bind to
 				sizeof(struct sockaddr_in)		// Size of address
@@ -307,10 +353,12 @@ int main(int argc, char **argv)
 	
 	time_t CurrentTime;
 	time(&CurrentTime);
-	time_t LastQueryTime = CurrentTime;
+	time_t LastQueryTime = 0;
 	time_t LastBroadcastTime = 0;
+	time_t LastLogTime = 0;
+	time_t DisplayTime = 0;
 	std::vector<struct sockaddr> BroadcastAddresses;
-	std::vector<CKasaClient> KasaClients;
+	std::map<CKasaClient, std::queue<std::string>> KasaClients;
 
 	// Loop until we get a Ctrl-C
 	while (bRun)
@@ -387,7 +435,8 @@ int main(int argc, char **argv)
 				}
 			}
 
-			if (difftime(CurrentTime, LastBroadcastTime) > 300) // only do this stuff every so often.
+			// periodically brodcast a UDP Query
+			if (difftime(CurrentTime, LastBroadcastTime) > 299)
 			{
 				LastBroadcastTime = CurrentTime;
 				//for each (in_addr Address in BroadcastAddresses)
@@ -419,6 +468,7 @@ int main(int argc, char **argv)
 			struct sockaddr sa;
 			socklen_t sa_len = sizeof(struct sockaddr);
 			int nRet = 0;
+			// Always check for UDP Messages
 			while ((nRet = recvfrom(ServerListenSocket, szBuf, sizeof(szBuf), 0, &sa, &sa_len)) > 0)
 			{
 				char buffer[256] = { 0 };
@@ -439,22 +489,16 @@ int main(int argc, char **argv)
 				if (ClientRequest.find("\"feature\":\"TIM:ENE\"") != std::string::npos)
 				{
 					// Then I want to add the device to my list to be polled for energy usage
-					std::vector<CKasaClient>::iterator ExistingClient = find_if(KasaClients.begin(), KasaClients.end(), std::bind2nd(NetworkAddressMatches<CKasaClient>(), sa));
-					if (ExistingClient != KasaClients.end())
-					{
-						ExistingClient->date = CurrentTime;
-					}
-					else
-					{
+					CKasaClient NewClient;
+					NewClient.address.sa_family = sa.sa_family;
+					for (auto index = 0; index < sizeof(NewClient.address.sa_data); index++)
+						NewClient.address.sa_data[index] = sa.sa_data[index];
+					NewClient.date = CurrentTime;
+					NewClient.information = ClientRequest;
+					std::queue<std::string> foo;
+					auto ret = KasaClients.insert(std::pair<CKasaClient, std::queue<std::string>>(NewClient, foo));
+					if (ret.first->second.empty())
 						std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << std::endl;
-						CKasaClient NewClient;
-						NewClient.address.sa_family = sa.sa_family;
-						for (auto index = 0; index < sizeof(NewClient.address.sa_data); index++)
-							NewClient.address.sa_data[index] = sa.sa_data[index];
-						NewClient.date = CurrentTime;
-						NewClient.information = ClientRequest;
-						KasaClients.push_back(NewClient);
-					}
 				}
 			}
 		}
@@ -463,8 +507,9 @@ int main(int argc, char **argv)
 		{
 			LastQueryTime = CurrentTime;
 
-			for (auto Client : KasaClients)
+			for (auto it = KasaClients.begin(); it != KasaClients.end(); ++it)
 			{
+				auto Client = it->first;
 				char ClientHostname[INET6_ADDRSTRLEN] = { 0 };
 				if (Client.address.sa_family == AF_INET)
 				{
@@ -515,9 +560,17 @@ int main(int argc, char **argv)
 								{
 									uint8_t InBuffer[1024 * 2] = { 0 };
 									nRet = recv(theSocket, InBuffer, sizeof(InBuffer), MSG_WAITALL);
-									KasaDecrypt(nRet, InBuffer, OutBuffer);
-									OutBuffer[nRet] = '\0';
-									std::cout << " <=(" << nRet << ") " << OutBuffer;
+									if (nRet > 0)
+									{
+										std::ostringstream LogLine;
+										LogLine << "{\"date\":\"" << timeToExcelDate(CurrentTime) << "\",";
+										LogLine << Client.GetDeviceID() << ",";
+										KasaDecrypt(nRet, InBuffer, OutBuffer);
+										LogLine << std::string((char *)OutBuffer, nRet) << "}";
+										it->second.push(LogLine.str());
+										std::string Response((char *)OutBuffer, nRet);
+										std::cout << " <=(" << nRet << ") " << Response;
+									}
 								}
 								std::cout << std::endl;
 							}
@@ -533,8 +586,24 @@ int main(int argc, char **argv)
 				}
 			}
 		}
+
+		if (difftime(CurrentTime, LastLogTime) > 59) // only do this stuff every so often.
+		{
+			LastLogTime = CurrentTime;
+			GenerateLogFile(KasaClients);
+		}
+			
 		usleep(100); // sleep for 100 microseconds (0.1 ms)
+		if (difftime(CurrentTime, DisplayTime) > 0) // update display if it's been over a second
+		{
+			DisplayTime = CurrentTime;
+			std::cout << "[" << getTimeISO8601() << "]\r";
+			std::cout.flush();
+		}
+
 	}
+
+	GenerateLogFile(KasaClients);
 
 	if (ServerListenSocket != -1)
 	{
