@@ -172,6 +172,11 @@ std::string CKasaClient::GetDeviceID(void) const
 	{
 		DeviceID = information.substr(pos);
 		DeviceID = DeviceID.substr(0, DeviceID.find_first_of(",}"));
+		// HACK: I need to clean this up..  
+		DeviceID = DeviceID.substr(DeviceID.find(':'));
+		DeviceID.erase(DeviceID.find(':'), 1);
+		DeviceID.erase(DeviceID.find('"'), 1);
+		DeviceID.erase(DeviceID.find('"'), 1);
 	}
 	return(DeviceID);
 }
@@ -185,18 +190,12 @@ bool operator <(const CKasaClient &a, const CKasaClient &b)
 }
 /////////////////////////////////////////////////////////////////////////////
 std::string LogDirectory("./");
-std::string GenerateLogFileName(const CKasaClient &a)
+std::string GenerateLogFileName(const std::string &DeviceID)
 {
 	std::ostringstream OutputFilename;
 	OutputFilename << LogDirectory;
 	OutputFilename << "kasa-";
-	// HACK: I need to clean this up..  
-	std::string ID(a.GetDeviceID().substr(a.GetDeviceID().find(':')));
-	ID.erase(ID.find(':'), 1);
-	ID.erase(ID.find('"'), 1);
-	ID.erase(ID.find('"'), 1);
-	OutputFilename << ID;
-	// find device id in "a.information" and append it here
+	OutputFilename << DeviceID;
 	time_t timer;
 	time(&timer);
 	struct tm UTC;
@@ -213,7 +212,7 @@ bool GenerateLogFile(std::map<CKasaClient, std::queue<std::string>> &KasaMap)
 	{
 		if (!it->second.empty()) // Only open the log file if there are entries to add
 		{
-			std::ofstream LogFile(GenerateLogFileName(it->first), std::ios_base::out | std::ios_base::app | std::ios_base::ate);
+			std::ofstream LogFile(GenerateLogFileName(it->first.GetDeviceID()), std::ios_base::out | std::ios_base::app | std::ios_base::ate);
 			if (LogFile.is_open())
 			{
 				while (!it->second.empty())
@@ -227,6 +226,80 @@ bool GenerateLogFile(std::map<CKasaClient, std::queue<std::string>> &KasaMap)
 		}
 	}
 	return(rval);
+}
+/////////////////////////////////////////////////////////////////////////////
+void GetMRTGOutput(const std::string &DeviceID)
+{
+	std::ifstream TheFile(GenerateLogFileName(DeviceID));
+	if (TheFile.is_open())
+	{
+		TheFile.seekg(0, std::ios_base::end);      //Start at end of file
+		char ch = ' ';                             //Init ch not equal to '\n'
+		while (ch != '\n')
+		{
+			TheFile.seekg(-2, std::ios_base::cur); //Two steps back, this means we will NOT check the last character
+			if ((int)TheFile.tellg() <= 0)         //If passed the start of the file,
+			{
+				TheFile.seekg(0);                  //this is the start of the line
+				break;
+			}
+			TheFile.get(ch);                       //Check the next character
+		}
+		std::string TheLastLine;
+		std::getline(TheFile, TheLastLine);
+		TheFile.close();
+
+		std::string powerKey("\"power\"");
+		double power = 0;
+		auto pos = TheLastLine.find(powerKey);
+		if (pos != std::string::npos)
+		{
+			std::string Value;
+			Value = TheLastLine.substr(pos);
+			Value = Value.substr(0, Value.find_first_of(",}"));
+			// HACK: I need to clean this up..  
+			Value = Value.substr(Value.find(':'));
+			Value.erase(Value.find(':'), 1);
+			char* pEnd;
+			power = strtod(Value.c_str(), &pEnd);
+		}
+
+		std::string currentKey("\"current\"");
+		double current = 0;
+		pos = TheLastLine.find(currentKey);
+		if (pos != std::string::npos)
+		{
+			std::string Value;
+			Value = TheLastLine.substr(pos);
+			Value = Value.substr(0, Value.find_first_of(",}"));
+			// HACK: I need to clean this up..  
+			Value = Value.substr(Value.find(':'));
+			Value.erase(Value.find(':'), 1);
+			char* pEnd;
+			current = strtod(Value.c_str(), &pEnd);
+		}
+
+		std::string voltageKey("\"voltage\"");
+		double voltage = 0;
+		pos = TheLastLine.find(voltageKey);
+		if (pos != std::string::npos)
+		{
+			std::string Value;
+			Value = TheLastLine.substr(pos);
+			Value = Value.substr(0, Value.find_first_of(",}"));
+			// HACK: I need to clean this up..  
+			Value = Value.substr(Value.find(':'));
+			Value.erase(Value.find(':'), 1);
+			char* pEnd;
+			voltage = strtod(Value.c_str(), &pEnd);
+		}
+
+		std::cout << std::dec; // make sure I'm putting things in decimal format
+		std::cout << power * 1000.0 << std::endl; // current state of the second variable, normally 'outgoing bytes count'
+		std::cout << voltage * 1000.0 << std::endl; // current state of the first variable, normally 'incoming bytes count'
+		std::cout << " " << std::endl; // string (in any human readable format), uptime of the target.
+		std::cout << DeviceID << std::endl; // string, name of the target.
+	}
 }
 /////////////////////////////////////////////////////////////////////////////
 volatile bool bRun = true; // This is declared volatile so that the compiler won't optimize it out of loops later in the code
@@ -252,7 +325,7 @@ static void usage(int argc, char **argv)
 	std::cout << "    -l | --log name      Logging Directory [" << LogDirectory << "]" << std::endl;
 	std::cout << "    -t | --time seconds  time between log file writes [" << LogFileTime << "]" << std::endl;
 	std::cout << "    -v | --verbose level stdout verbosity level [" << ConsoleVerbosity << "]" << std::endl;
-	std::cout << "    -m | --mrtg XX:XX:XX:XX:XX:XX Get last value for this address" << std::endl;
+	std::cout << "    -m | --mrtg 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D Get last value for this deviceId" << std::endl;
 	std::cout << std::endl;
 }
 static const char short_options[] = "hl:t:v:m:";
@@ -310,6 +383,12 @@ int main(int argc, char **argv)
 			usage(argc, argv);
 			exit(EXIT_FAILURE);
 		}
+	}
+	///////////////////////////////////////////////////////////////////////////////////////////////
+	if (!MRTGAddress.empty())
+	{
+		GetMRTGOutput(MRTGAddress);
+		exit(EXIT_SUCCESS);
 	}
 	///////////////////////////////////////////////////////////////////////////////////////////////
 	if (ConsoleVerbosity > 0)
@@ -564,7 +643,7 @@ int main(int argc, char **argv)
 									{
 										std::ostringstream LogLine;
 										LogLine << "{\"date\":\"" << timeToExcelDate(CurrentTime) << "\",";
-										LogLine << Client.GetDeviceID() << ",";
+										LogLine << "\"deviceId\":\"" << Client.GetDeviceID() << "\",";
 										KasaDecrypt(nRet, InBuffer, OutBuffer);
 										LogLine << std::string((char *)OutBuffer, nRet) << "}";
 										it->second.push(LogLine.str());

@@ -14,6 +14,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <RemoteTarget>-1845794341;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
+    <RemoteDebuggerCommandArguments>-m 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D</RemoteDebuggerCommandArguments>
+    <DebuggerFlavor>LinuxDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <RemoteTarget>-1845794341;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
