@@ -295,8 +295,8 @@ void GetMRTGOutput(const std::string &DeviceID)
 		}
 
 		std::cout << std::dec; // make sure I'm putting things in decimal format
-		std::cout << power * 1000.0 << std::endl; // current state of the second variable, normally 'outgoing bytes count'
-		std::cout << voltage * 1000.0 << std::endl; // current state of the first variable, normally 'incoming bytes count'
+		std::cout << std::fixed << power * 1000.0 << std::endl; // current state of the second variable, normally 'outgoing bytes count'
+		std::cout << std::fixed << voltage * 1000.0 << std::endl; // current state of the first variable, normally 'incoming bytes count'
 		std::cout << " " << std::endl; // string (in any human readable format), uptime of the target.
 		std::cout << DeviceID << std::endl; // string, name of the target.
 	}
@@ -406,6 +406,7 @@ int main(int argc, char **argv)
 	if (ServerListenSocket != -1)
 	{
 		struct sockaddr_in saServerListen;
+		memset(&saServerListen, 0, sizeof saServerListen); // make sure the struct is empty
 		saServerListen.sin_family = AF_INET;
 		saServerListen.sin_addr.s_addr = INADDR_ANY;
 		//saServerListen.sin_port = htons(9999);	// Port number
@@ -415,7 +416,7 @@ int main(int argc, char **argv)
 				sizeof(struct sockaddr_in)		// Size of address
 		))
 		{
-			std::cout << "[" << getTimeISO8601() << "] bind returned -1 indicating failure" << std::endl;
+			std::cerr << "[" << getTimeISO8601() << "] bind returned -1 indicating failure" << std::endl;
 			close(ServerListenSocket);
 			ServerListenSocket = -1;
 		}
@@ -458,9 +459,12 @@ int main(int argc, char **argv)
 						if (ifa->ifa_addr != NULL)
 						{
 							int family = ifa->ifa_addr->sa_family;
-							std::cout << ifa->ifa_name;
-							std::cout << "\t" << ((family == AF_PACKET) ? "AF_PACKET" : (family == AF_INET) ? "AF_INET" : (family == AF_INET6) ? "AF_INET6" : "???");
-							std::cout << " (" << family << ")";
+							if (ConsoleVerbosity > 0)
+							{
+								std::cout << ifa->ifa_name;
+								std::cout << "\t" << ((family == AF_PACKET) ? "AF_PACKET" : (family == AF_INET) ? "AF_INET" : (family == AF_INET6) ? "AF_INET6" : "???");
+								std::cout << " (" << family << ")";
+							}
 							if (family == AF_INET || family == AF_INET6)
 							{
 								char host[NI_MAXHOST] = { 0 };
@@ -469,7 +473,8 @@ int main(int argc, char **argv)
 									host, NI_MAXHOST,
 									NULL, 0, NI_NUMERICHOST))
 								{
-									std::cout << "\taddress: " << host;
+									if (ConsoleVerbosity > 0)
+										std::cout << "\taddress: " << host;
 								}
 								host[0] =  0;
 								if (0 == getnameinfo(ifa->ifa_ifu.ifu_broadaddr,
@@ -477,7 +482,8 @@ int main(int argc, char **argv)
 									host, NI_MAXHOST,
 									NULL, 0, NI_NUMERICHOST))
 								{
-									std::cout << "\tbroadcast: " << host;
+									if (ConsoleVerbosity > 0)
+										std::cout << "\tbroadcast: " << host;
 									BroadcastAddresses.push_back(*ifa->ifa_ifu.ifu_broadaddr);
 								}
 
@@ -486,7 +492,8 @@ int main(int argc, char **argv)
 								//std::cout << inet_ntoa(baddr) << std::endl;
 								//BroadcastAddresses.push_back(baddr);
 							}
-							std::cout << std::endl;
+							if (ConsoleVerbosity > 0)
+								std::cout << std::endl;
 							//else if (family == AF_PACKET && ifa->ifa_data != NULL) 
 							//{
 							//	struct rtnl_link_stats *stats = (struct rtnl_link_stats *) ifa->ifa_data;
@@ -564,7 +571,8 @@ int main(int argc, char **argv)
 					struct sockaddr_in6 * foo = (struct sockaddr_in6 *)&sa;
 					inet_ntop(sa.sa_family, &(foo->sin6_addr), ClientHostname, INET6_ADDRSTRLEN);
 				}
-				std::cout << "[" << getTimeISO8601() << "] client at (" << ClientHostname << ") says \"" << ClientRequest << "\"" << std::endl;
+				if (ConsoleVerbosity > 0)
+					std::cout << "[" << getTimeISO8601() << "] client at (" << ClientHostname << ") says \"" << ClientRequest << "\"" << std::endl;
 				if (ClientRequest.find("\"feature\":\"TIM:ENE\"") != std::string::npos)
 				{
 					// Then I want to add the device to my list to be polled for energy usage
@@ -576,8 +584,9 @@ int main(int argc, char **argv)
 					NewClient.information = ClientRequest;
 					std::queue<std::string> foo;
 					auto ret = KasaClients.insert(std::pair<CKasaClient, std::queue<std::string>>(NewClient, foo));
-					if (ret.first->second.empty())
-						std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << std::endl;
+					if (ConsoleVerbosity > 0)
+						if (ret.first->second.empty())
+							std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << std::endl;
 				}
 			}
 		}
@@ -622,7 +631,8 @@ int main(int argc, char **argv)
 								char bufHostName[255] = { 0 };
 								char bufService[255] = { 0 };
 								getnameinfo(rp->ai_addr, rp->ai_addrlen, bufHostName, sizeof(bufHostName), bufService, sizeof(bufService), 0);
-								std::cout << "[" << getTimeISO8601() << "] Connected to: " << bufHostName << " Port: " << bufService;
+								if (ConsoleVerbosity > 0)
+									std::cout << "[" << getTimeISO8601() << "] Connected to: " << bufHostName << " Port: " << bufService;
 
 								uint8_t OutBuffer[1024] = { 0 };
 								size_t bufLen = sizeof(KasaEmeter);
@@ -631,7 +641,8 @@ int main(int argc, char **argv)
 								OutBufferLen = htonl(bufLen);
 								ssize_t nRet = send(theSocket, &OutBufferLen, sizeof(OutBufferLen), 0);
 								nRet = send(theSocket, OutBuffer, bufLen, 0);
-								std::cout << " (" << nRet << ")=> " << KasaEmeter;
+								if (ConsoleVerbosity > 0)
+									std::cout << " (" << nRet << ")=> " << KasaEmeter;
 
 								uint32_t ReturnStringLength = 0;
 								nRet = recv(theSocket, &ReturnStringLength, sizeof(ReturnStringLength), MSG_WAITALL);
@@ -648,10 +659,12 @@ int main(int argc, char **argv)
 										LogLine << std::string((char *)OutBuffer, nRet) << "}";
 										it->second.push(LogLine.str());
 										std::string Response((char *)OutBuffer, nRet);
-										std::cout << " <=(" << nRet << ") " << Response;
+										if (ConsoleVerbosity > 0)
+											std::cout << " <=(" << nRet << ") " << Response;
 									}
 								}
-								std::cout << std::endl;
+								if (ConsoleVerbosity > 0)
+									std::cout << std::endl;
 							}
 							close(theSocket);
 						}
@@ -673,7 +686,8 @@ int main(int argc, char **argv)
 		}
 			
 		usleep(100); // sleep for 100 microseconds (0.1 ms)
-		if (difftime(CurrentTime, DisplayTime) > 0) // update display if it's been over a second
+		if (ConsoleVerbosity > 0)
+			if (difftime(CurrentTime, DisplayTime) > 0) // update display if it's been over a second
 		{
 			DisplayTime = CurrentTime;
 			std::cout << "[" << getTimeISO8601() << "]\r";

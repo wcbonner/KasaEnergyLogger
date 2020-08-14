@@ -78,6 +78,7 @@
     <ClCompile Include="kasaenergylogger.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="mrtg.cfg" />
   </ItemGroup>
   <ItemDefinitionGroup />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

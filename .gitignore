@@ -10,3 +10,5 @@
 /bin/x64
 /obj/x64
 /obj/ARM/Debug
+/bin/ARM/Release
+/obj/ARM/Release
