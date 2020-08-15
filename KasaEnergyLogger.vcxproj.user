@@ -7,14 +7,15 @@
     <RemoteTarget>1071743134;172.20.67.46 (username=, port=22, authentication=Password)</RemoteTarget>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
-    <RemoteTarget>847545320;WimPiZeroW.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
+    <RemoteTarget>-29010207;WimPiZeroW.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
-    <RemoteTarget>847545320;WimPiZeroW.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
+    <RemoteTarget>-29010207;WimPiZeroW.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <RemoteTarget>930509390;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
-    <RemoteDebuggerCommandArguments>-m 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D</RemoteDebuggerCommandArguments>
+    <RemoteDebuggerCommandArguments>
+    </RemoteDebuggerCommandArguments>
     <DebuggerFlavor>LinuxDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">

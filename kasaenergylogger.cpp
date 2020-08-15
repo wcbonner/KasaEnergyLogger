@@ -294,9 +294,43 @@ void GetMRTGOutput(const std::string &DeviceID)
 			voltage = strtod(Value.c_str(), &pEnd);
 		}
 
+		std::string powerKey2("\"power_mw\"");
+		long power_mw = 0;
+		pos = TheLastLine.find(powerKey2);
+		if (pos != std::string::npos)
+		{
+			std::string Value;
+			Value = TheLastLine.substr(pos);
+			Value = Value.substr(0, Value.find_first_of(",}"));
+			// HACK: I need to clean this up..  
+			Value = Value.substr(Value.find(':'));
+			Value.erase(Value.find(':'), 1);
+			power_mw = std::stol(Value);
+		}
+
+		std::string voltageKey2("\"voltage_mv\"");
+		long voltage_mv = 0;
+		pos = TheLastLine.find(voltageKey2);
+		if (pos != std::string::npos)
+		{
+			std::string Value;
+			Value = TheLastLine.substr(pos);
+			Value = Value.substr(0, Value.find_first_of(",}"));
+			// HACK: I need to clean this up..  
+			Value = Value.substr(Value.find(':'));
+			Value.erase(Value.find(':'), 1);
+			voltage_mv = std::stol(Value);
+		}
+
 		std::cout << std::dec; // make sure I'm putting things in decimal format
-		std::cout << std::fixed << power * 1000.0 << std::endl; // current state of the second variable, normally 'outgoing bytes count'
-		std::cout << std::fixed << voltage * 1000.0 << std::endl; // current state of the first variable, normally 'incoming bytes count'
+		if (power_mw != 0)
+			std::cout << power_mw << std::endl; // current state of the second variable, normally 'outgoing bytes count'
+		else
+			std::cout << std::fixed << power * 1000.0 << std::endl; // current state of the second variable, normally 'outgoing bytes count'
+		if (voltage_mv != 0)
+			std::cout << voltage_mv << std::endl; // current state of the first variable, normally 'incoming bytes count'
+		else
+			std::cout << std::fixed << voltage * 1000.0 << std::endl; // current state of the first variable, normally 'incoming bytes count'
 		std::cout << " " << std::endl; // string (in any human readable format), uptime of the target.
 		std::cout << DeviceID << std::endl; // string, name of the target.
 	}
@@ -557,7 +591,7 @@ int main(int argc, char **argv)
 			// Always check for UDP Messages
 			while ((nRet = recvfrom(ServerListenSocket, szBuf, sizeof(szBuf), 0, &sa, &sa_len)) > 0)
 			{
-				char buffer[256] = { 0 };
+				char buffer[8192] = { 0 };
 				KasaDecrypt(nRet, (uint8_t *)szBuf, (uint8_t *)buffer);
 				std::string ClientRequest(buffer, nRet);
 				char ClientHostname[INET6_ADDRSTRLEN] = { 0 };
@@ -572,7 +606,7 @@ int main(int argc, char **argv)
 					inet_ntop(sa.sa_family, &(foo->sin6_addr), ClientHostname, INET6_ADDRSTRLEN);
 				}
 				if (ConsoleVerbosity > 0)
-					std::cout << "[" << getTimeISO8601() << "] client at (" << ClientHostname << ") says \"" << ClientRequest << "\"" << std::endl;
+					std::cout << "[" << getTimeISO8601() << "] client (" << ClientHostname << ") says \"" << ClientRequest << "\"" << std::endl;
 				if (ClientRequest.find("\"feature\":\"TIM:ENE\"") != std::string::npos)
 				{
 					// Then I want to add the device to my list to be polled for energy usage
@@ -635,33 +669,38 @@ int main(int argc, char **argv)
 									std::cout << "[" << getTimeISO8601() << "] Connected to: " << bufHostName << " Port: " << bufService;
 
 								uint8_t OutBuffer[1024] = { 0 };
-								size_t bufLen = sizeof(KasaEmeter);
+								size_t bufLen = strlen((const char*)KasaEmeter);
 								KasaEncrypt(bufLen, KasaEmeter, OutBuffer+sizeof(uint32_t));
 								uint32_t * OutBufferLen = (uint32_t *)OutBuffer;
 								*OutBufferLen = htonl(bufLen);
 								ssize_t nRet = send(theSocket, OutBuffer, bufLen+sizeof(uint32_t), 0);
+								//if ((ConsoleVerbosity > 0) && (nRet < (bufLen + sizeof(uint32_t))))
+								//	std::cout << " not everything was sent in one go!";
 								if (ConsoleVerbosity > 0)
 									std::cout << " (" << nRet << ")=> " << KasaEmeter;
 
-								uint32_t ReturnStringLength = 0;
-								nRet = recv(theSocket, &ReturnStringLength, sizeof(ReturnStringLength), MSG_WAITALL);
+								uint8_t InBuffer[1024 * 2] = { 0 };
+								//nRet = recv(theSocket, InBuffer, sizeof(InBuffer), MSG_WAITALL);
+								nRet = recv(theSocket, InBuffer, sizeof(InBuffer), 0);
 								if (nRet > 0)
 								{
-									uint8_t InBuffer[1024 * 2] = { 0 };
-									nRet = recv(theSocket, InBuffer, sizeof(InBuffer), MSG_WAITALL);
-									if (nRet > 0)
-									{
-										std::ostringstream LogLine;
-										LogLine << "{\"date\":\"" << timeToExcelDate(CurrentTime) << "\",";
-										LogLine << "\"deviceId\":\"" << Client.GetDeviceID() << "\",";
-										KasaDecrypt(nRet, InBuffer, OutBuffer);
-										std::string Response((char *)OutBuffer, nRet);
-										LogLine << Response << "}";
-										it->second.push(LogLine.str());
-										if (ConsoleVerbosity > 0)
-											std::cout << " <=(" << nRet << ") " << Response;
-									}
+									std::ostringstream LogLine;
+									LogLine << "{\"date\":\"" << timeToExcelDate(CurrentTime) << "\",";
+									LogLine << "\"deviceId\":\"" << Client.GetDeviceID() << "\",";
+									KasaDecrypt(nRet-sizeof(uint32_t), InBuffer+sizeof(uint32_t), OutBuffer);
+									std::string Response((char *)OutBuffer, nRet);
+									LogLine << Response << "}";
+									it->second.push(LogLine.str());
+									if (ConsoleVerbosity > 0)
+										std::cout << " <=(" << nRet << ") " << Response;
 								}
+								//else if (it->second.empty())
+								//{
+								//	// If the device didn't respond, and we don't have any responses in the queue, let's remove it from the map.
+								//	if (ConsoleVerbosity > 0)
+								//		std::cout << "  No Response. Removing from map.";
+								//	KasaClients.erase(it);
+								//}
 								if (ConsoleVerbosity > 0)
 									std::cout << std::endl;
 							}
