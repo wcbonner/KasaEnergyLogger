@@ -636,11 +636,10 @@ int main(int argc, char **argv)
 
 								uint8_t OutBuffer[1024] = { 0 };
 								size_t bufLen = sizeof(KasaEmeter);
-								KasaEncrypt(bufLen, KasaEmeter, OutBuffer);
-								uint32_t OutBufferLen;
-								OutBufferLen = htonl(bufLen);
-								ssize_t nRet = send(theSocket, &OutBufferLen, sizeof(OutBufferLen), 0);
-								nRet = send(theSocket, OutBuffer, bufLen, 0);
+								KasaEncrypt(bufLen, KasaEmeter, OutBuffer+sizeof(uint32_t));
+								uint32_t * OutBufferLen = (uint32_t *)OutBuffer;
+								*OutBufferLen = htonl(bufLen);
+								ssize_t nRet = send(theSocket, OutBuffer, bufLen+sizeof(uint32_t), 0);
 								if (ConsoleVerbosity > 0)
 									std::cout << " (" << nRet << ")=> " << KasaEmeter;
 
@@ -656,9 +655,9 @@ int main(int argc, char **argv)
 										LogLine << "{\"date\":\"" << timeToExcelDate(CurrentTime) << "\",";
 										LogLine << "\"deviceId\":\"" << Client.GetDeviceID() << "\",";
 										KasaDecrypt(nRet, InBuffer, OutBuffer);
-										LogLine << std::string((char *)OutBuffer, nRet) << "}";
-										it->second.push(LogLine.str());
 										std::string Response((char *)OutBuffer, nRet);
+										LogLine << Response << "}";
+										it->second.push(LogLine.str());
 										if (ConsoleVerbosity > 0)
 											std::cout << " <=(" << nRet << ") " << Response;
 									}
