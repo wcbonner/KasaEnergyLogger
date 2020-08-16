@@ -4,6 +4,6 @@ Section: custom
 Priority: optional
 Architecture: armhf
 Essential: no
-Installed-Size: 95
+Installed-Size: 58
 Maintainer: wcbonner@users.noreply.github.com
 Description: Discover TP-Link Kasa devices and log reported energy usage
