@@ -78,7 +78,13 @@
     <ClCompile Include="kasaenergylogger.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="KasaEnergyLogger\DEBIAN\control" />
+    <None Include="KasaEnergyLogger\DEBIAN\postinst" />
+    <None Include="KasaEnergyLogger\DEBIAN\postrm" />
+    <None Include="KasaEnergyLogger\DEBIAN\prerm" />
+    <None Include="KasaEnergyLogger\etc\systemd\system\kasaenergylogger.service" />
     <None Include="LICENSE" />
+    <None Include="makefile" />
     <None Include="mrtg.cfg" />
     <None Include="README.md" />
   </ItemGroup>

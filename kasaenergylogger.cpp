@@ -1,5 +1,27 @@
 /////////////////////////////////////////////////////////////////////////////
 // Copyright (C) 2020 William C Bonner
+//
+//	MIT License
+//
+//	Permission is hereby granted, free of charge, to any person obtaining a copy
+//	of this software and associated documentation files(the "Software"), to deal
+//	in the Software without restriction, including without limitation the rights
+//	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//	copies of the Software, and to permit persons to whom the Software is
+//	furnished to do so, subject to the following conditions :
+//
+//	The above copyright notice and this permission notice shall be included in all
+//	copies or substantial portions of the Software.
+//
+//	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+//	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//	SOFTWARE.
+//
+/////////////////////////////////////////////////////////////////////////////
 // This code borrows from plenty of other sources I've found.
 // I try to leave credits in comments scattered through the code itself and
 // would appreciate similar credit if you use portions of my code.
@@ -21,9 +43,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>		// For socket(), connect(), send(), and recv()
 #include <fcntl.h>
-//#include <sys/stat.h>
-//#include <sys/statfs.h>
-//#include <sys/ioctl.h>
 #include <netinet/in.h>		// For sockaddr_in
 #include <arpa/inet.h>		// For inet_addr()
 #include <ifaddrs.h>		// for getifaddrs()
@@ -167,13 +186,13 @@ std::string CKasaClient::GetDeviceID(void) const
 		pos = information.find("\"id\"");
 	if (pos != std::string::npos)
 	{
-		DeviceID = information.substr(pos);
-		DeviceID = DeviceID.substr(0, DeviceID.find_first_of(",}"));
 		// HACK: I need to clean this up..  
-		DeviceID = DeviceID.substr(DeviceID.find(':'));
-		DeviceID.erase(DeviceID.find(':'), 1);
-		DeviceID.erase(DeviceID.find('"'), 1);
-		DeviceID.erase(DeviceID.find('"'), 1);
+		DeviceID = information.substr(pos);	// value starts at key
+		DeviceID.erase(DeviceID.find_first_of(",}"));	// truncate value
+		DeviceID.erase(0, DeviceID.find(':'));	// move past key value
+		DeviceID.erase(DeviceID.find(':'), 1);	// move past seperator
+		DeviceID.erase(DeviceID.find('"'), 1);	// erase leading quote
+		DeviceID.erase(DeviceID.find('"'), 1);	// erase trailing quote
 	}
 	return(DeviceID);
 }

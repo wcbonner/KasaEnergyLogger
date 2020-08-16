@@ -1,0 +1,17 @@
+# Contents of /etc/systemd/system/kasaenergylogger.service
+[Unit]
+Description=KasaEnergyLogger service
+After=network.target
+Requires=network.target
+StartLimitBurst=5
+StartLimitIntervalSec=33
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+ExecStart=/usr/local/bin/kasaenergylogger -v 0 -l /var/log/kasaenergylogger/
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target
