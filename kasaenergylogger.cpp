@@ -125,24 +125,26 @@ std::string timeToExcelDate(const time_t & TheTime)
 	return(ExcelDate.str());
 }
 /////////////////////////////////////////////////////////////////////////////
-void KasaEncrypt(const size_t len, const uint8_t input[], uint8_t output[])
+void KasaEncrypt(const std::string &input, uint8_t * output)
 {
 	uint8_t key = 0xAB;
-	for (size_t index = 0; index < len; index++)
+	for (auto it = input.begin(); it != input.end(); it++)
 	{
-		uint8_t a = key ^ input[index];
+		uint8_t a = key ^ *it;
 		key = a;
-		output[index] = a;
+		*output++ = a;
 	}
 }
-void KasaDecrypt(const size_t len, const uint8_t input[], uint8_t output[])
+void KasaDecrypt(const size_t len, const uint8_t input[], std::string &output)
 {
+	output.clear();
+	output.reserve(len);	// minor optimization, not required but efficient
 	uint8_t key = 0xAB;
 	for (size_t index = 0; index < len; index++)
 	{
 		uint8_t a = key ^ input[index];
 		key = input[index];
-		output[index] = a;
+		output += a;
 	}
 }
 /////////////////////////////////////////////////////////////////////////////
@@ -244,90 +246,83 @@ void GetMRTGOutput(const std::string &DeviceID)
 		std::getline(TheFile, TheLastLine);
 		TheFile.close();
 
-		const std::string powerKey("\"power\"");
-		double power = 0;
-		auto pos = TheLastLine.find(powerKey);
+		time_t CurrentTime, DataTime = 0;
+		time(&CurrentTime);
+		auto pos = TheLastLine.find("\"date\"");
 		if (pos != std::string::npos)
 		{
-			std::string Value;
-			Value = TheLastLine.substr(pos);
-			Value = Value.substr(0, Value.find_first_of(",}"));
 			// HACK: I need to clean this up..  
-			Value = Value.substr(Value.find(':'));
-			Value.erase(Value.find(':'), 1);
-			char* pEnd;
-			power = strtod(Value.c_str(), &pEnd);
+			std::string Value(TheLastLine.substr(pos));	// value starts at key
+			Value.erase(Value.find_first_of(",}"));	// truncate value
+			Value.erase(0, Value.find(':'));	// move past key value
+			Value.erase(Value.find(':'), 1);	// move past seperator
+			Value.erase(Value.find('"'), 1);	// erase leading quote
+			Value.erase(Value.find('"'), 1);	// erase trailing quote
+			DataTime = ISO8601totime(Value);
 		}
 
-		const std::string currentKey("\"current\"");
-		double current = 0;
-		pos = TheLastLine.find(currentKey);
-		if (pos != std::string::npos)
+		if (difftime(CurrentTime, DataTime) < 301) // Only return data if we've recieved data in the last 5 minutes
 		{
-			std::string Value;
-			Value = TheLastLine.substr(pos);
-			Value = Value.substr(0, Value.find_first_of(",}"));
-			// HACK: I need to clean this up..  
-			Value = Value.substr(Value.find(':'));
-			Value.erase(Value.find(':'), 1);
-			char* pEnd;
-			current = strtod(Value.c_str(), &pEnd);
-		}
+			double power = 0;
+			pos = TheLastLine.find("\"power\"");
+			if (pos != std::string::npos)
+			{
+				// HACK: I need to clean this up..  
+				std::string Value(TheLastLine.substr(pos));	// value starts at key
+				Value.erase(Value.find_first_of(",}"));	// truncate value
+				Value.erase(0, Value.find(':'));	// move past key value
+				Value.erase(Value.find(':'), 1);	// move past seperator
+				power = std::stod(Value.c_str());
+			}
 
-		const std::string voltageKey("\"voltage\"");
-		double voltage = 0;
-		pos = TheLastLine.find(voltageKey);
-		if (pos != std::string::npos)
-		{
-			std::string Value;
-			Value = TheLastLine.substr(pos);
-			Value = Value.substr(0, Value.find_first_of(",}"));
-			// HACK: I need to clean this up..  
-			Value = Value.substr(Value.find(':'));
-			Value.erase(Value.find(':'), 1);
-			char* pEnd;
-			voltage = strtod(Value.c_str(), &pEnd);
-		}
+			double voltage = 0;
+			pos = TheLastLine.find("\"voltage\"");
+			if (pos != std::string::npos)
+			{
+				// HACK: I need to clean this up..  
+				std::string Value(TheLastLine.substr(pos));	// value starts at key
+				Value.erase(Value.find_first_of(",}"));	// truncate value
+				Value.erase(0, Value.find(':'));	// move past key value
+				Value.erase(Value.find(':'), 1);	// move past seperator
+				voltage = std::stod(Value.c_str());
+			}
 
-		const std::string powerKey2("\"power_mw\"");
-		long power_mw = 0;
-		pos = TheLastLine.find(powerKey2);
-		if (pos != std::string::npos)
-		{
-			std::string Value;
-			Value = TheLastLine.substr(pos);
-			Value = Value.substr(0, Value.find_first_of(",}"));
-			// HACK: I need to clean this up..  
-			Value = Value.substr(Value.find(':'));
-			Value.erase(Value.find(':'), 1);
-			power_mw = std::stol(Value);
-		}
+			long power_mw = 0;
+			pos = TheLastLine.find("\"power_mw\"");
+			if (pos != std::string::npos)
+			{
+				// HACK: I need to clean this up..  
+				std::string Value(TheLastLine.substr(pos));	// value starts at key
+				Value.erase(Value.find_first_of(",}"));	// truncate value
+				Value.erase(0, Value.find(':'));	// move past key value
+				Value.erase(Value.find(':'), 1);	// move past seperator
+				power_mw = std::stol(Value);
+			}
 
-		const std::string voltageKey2("\"voltage_mv\"");
-		long voltage_mv = 0;
-		pos = TheLastLine.find(voltageKey2);
-		if (pos != std::string::npos)
-		{
-			std::string Value;
-			Value = TheLastLine.substr(pos);
-			Value = Value.substr(0, Value.find_first_of(",}"));
-			// HACK: I need to clean this up..  
-			Value = Value.substr(Value.find(':'));
-			Value.erase(Value.find(':'), 1);
-			voltage_mv = std::stol(Value);
-		}
+			long voltage_mv = 0;
+			pos = TheLastLine.find("\"voltage_mv\"");
+			if (pos != std::string::npos)
+			{
+				// HACK: I need to clean this up..  
+				std::string Value(TheLastLine.substr(pos));	// value starts at key
+				Value.erase(Value.find_first_of(",}"));	// truncate value
+				Value.erase(0, Value.find(':'));	// move past key value
+				Value.erase(Value.find(':'), 1);	// move past seperator
+				voltage_mv = std::stol(Value);
+			}
 
-		std::cout << std::dec; // make sure I'm putting things in decimal format
-		if (power_mw != 0)
-			std::cout << power_mw << std::endl; // current state of the second variable, normally 'outgoing bytes count'
-		else
-			std::cout << std::fixed << power * 1000.0 << std::endl; // current state of the second variable, normally 'outgoing bytes count'
-		if (voltage_mv != 0)
-			std::cout << voltage_mv << std::endl; // current state of the first variable, normally 'incoming bytes count'
-		else
-			std::cout << std::fixed << voltage * 1000.0 << std::endl; // current state of the first variable, normally 'incoming bytes count'
-		std::cout << " " << std::endl; // string (in any human readable format), uptime of the target.
-		std::cout << DeviceID << std::endl; // string, name of the target.
+			std::cout << std::dec; // make sure I'm putting things in decimal format
+			if (power_mw != 0)
+				std::cout << power_mw << std::endl; // current state of the second variable, normally 'outgoing bytes count'
+			else
+				std::cout << std::fixed << power * 1000.0 << std::endl; // current state of the second variable, normally 'outgoing bytes count'
+			if (voltage_mv != 0)
+				std::cout << voltage_mv << std::endl; // current state of the first variable, normally 'incoming bytes count'
+			else
+				std::cout << std::fixed << voltage * 1000.0 << std::endl; // current state of the first variable, normally 'incoming bytes count'
+			std::cout << " " << std::endl; // string (in any human readable format), uptime of the target.
+			std::cout << DeviceID << std::endl; // string, name of the target.
+		}
 	}
 }
 /////////////////////////////////////////////////////////////////////////////
@@ -348,7 +343,7 @@ int LogFileTime = 60;
 static void usage(int argc, char **argv)
 {
 	std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
-	std::cout << "  Version 1.20200730-1 Built on: " __DATE__ " at " __TIME__ << std::endl;
+	std::cout << "  Version 1.20200816-1 Built on: " __DATE__ " at " __TIME__ << std::endl;
 	std::cout << "  Options:" << std::endl;
 	std::cout << "    -h | --help          Print this message" << std::endl;
 	std::cout << "    -l | --log name      Logging Directory [" << LogDirectory << "]" << std::endl;
@@ -389,7 +384,7 @@ int main(int argc, char **argv)
 			break;
 		case 't':
 			errno = 0;
-			LogFileTime = strtol(optarg, NULL, 0);
+			LogFileTime = std::stoi(optarg);
 			if (errno)
 			{
 				std::cerr << optarg << " error " << errno << ", " << strerror(errno) << std::endl;
@@ -398,7 +393,7 @@ int main(int argc, char **argv)
 			break;
 		case 'v':
 			errno = 0;
-			ConsoleVerbosity = strtol(optarg, NULL, 0);
+			ConsoleVerbosity = std::stoi(optarg);
 			if (errno)
 			{
 				std::cerr << optarg << " error " << errno << ", " << strerror(errno) << std::endl;
@@ -456,7 +451,7 @@ int main(int argc, char **argv)
 			fcntl(ServerListenSocket, F_SETFL, currentFlags);
 			// Because I'm using the same socket to send out my broadcast messages, I'm setting it to that here
 			int bBroadcastSocket = 1; // TRUE
-			int nRet = setsockopt(ServerListenSocket, SOL_SOCKET, SO_BROADCAST, (const char *)&bBroadcastSocket, sizeof(bBroadcastSocket));
+			setsockopt(ServerListenSocket, SOL_SOCKET, SO_BROADCAST, (const char *)&bBroadcastSocket, sizeof(bBroadcastSocket));
 		}
 	}
 	
@@ -560,11 +555,10 @@ int main(int argc, char **argv)
 				{
 					if (Address.sa_family == AF_INET)
 					{
-						const uint8_t KasaSysinfo[] = "{\"system\":{\"get_sysinfo\":{}}}";	// Get System Info (Software & Hardware Versions, MAC, deviceID, hwID etc.)
+						const std::string KasaSysinfo("{\"system\":{\"get_sysinfo\":{}}}");	// Get System Info (Software & Hardware Versions, MAC, deviceID, hwID etc.)
+						auto bufferlen = KasaSysinfo.length();
 						uint8_t buffer[256] = { 0 };
-						auto bufferlen = strnlen((const char *)KasaSysinfo, sizeof(buffer));
-						KasaEncrypt(bufferlen, KasaSysinfo, buffer);
-
+						KasaEncrypt(KasaSysinfo, buffer);
 						struct sockaddr_in *sin = (struct sockaddr_in *) &Address;
 						struct sockaddr_in saBroadCast;
 						saBroadCast.sin_family = AF_INET;
@@ -580,16 +574,15 @@ int main(int argc, char **argv)
 				}
 			}
 			// Recieve any reponses
-			char szBuf[8192];
+			uint8_t szBuf[8192];
 			struct sockaddr sa;
 			socklen_t sa_len = sizeof(struct sockaddr);
-			int nRet = 0;
+			ssize_t nRet = 0;
 			// Always check for UDP Messages
 			while ((nRet = recvfrom(ServerListenSocket, szBuf, sizeof(szBuf), 0, &sa, &sa_len)) > 0)
 			{
-				char buffer[8192] = { 0 };
-				KasaDecrypt(nRet, (uint8_t *)szBuf, (uint8_t *)buffer);
-				std::string ClientResponse(buffer, nRet);
+				std::string ClientResponse;
+				KasaDecrypt(nRet, szBuf, ClientResponse);
 				char ClientHostname[INET6_ADDRSTRLEN] = { 0 };
 				if (sa.sa_family == AF_INET)
 				{
@@ -608,7 +601,7 @@ int main(int argc, char **argv)
 					// Then I want to add the device to my list to be polled for energy usage
 					CKasaClient NewClient;
 					NewClient.address.sa_family = sa.sa_family;
-					for (auto index = 0; index < sizeof(NewClient.address.sa_data); index++)
+					for (long unsigned int index = 0; index < sizeof(NewClient.address.sa_data); index++)
 						NewClient.address.sa_data[index] = sa.sa_data[index];
 					NewClient.date = CurrentTime;
 					NewClient.information = ClientResponse;
@@ -707,7 +700,7 @@ int main(int argc, char **argv)
 								}
 								uint8_t OutBuffer[1024 * 2] = { 0 };
 								size_t bufLen = ssRequest.length();
-								KasaEncrypt(bufLen, (const uint8_t *)ssRequest.c_str(), OutBuffer + sizeof(uint32_t));
+								KasaEncrypt(ssRequest, OutBuffer + sizeof(uint32_t));
 								uint32_t * OutBufferLen = (uint32_t *)OutBuffer;
 								*OutBufferLen = htonl(bufLen);
 								ssize_t nRet = send(theSocket, OutBuffer, bufLen+sizeof(uint32_t), 0);
@@ -721,11 +714,11 @@ int main(int argc, char **argv)
 								nRet = recv(theSocket, InBuffer, sizeof(InBuffer), 0);
 								if (nRet > 0)
 								{
+									std::string Response;
+									KasaDecrypt(nRet - sizeof(uint32_t), InBuffer + sizeof(uint32_t), Response);
 									std::ostringstream LogLine;
 									LogLine << "{\"date\":\"" << timeToExcelDate(CurrentTime) << "\",";
 									LogLine << "\"deviceId\":\"" << Client.GetDeviceID() << "\",";
-									KasaDecrypt(nRet-sizeof(uint32_t), InBuffer+sizeof(uint32_t), OutBuffer);
-									std::string Response((char *)OutBuffer, nRet);
 									LogLine << Response << "}";
 									it->second.push(LogLine.str());
 									if (ConsoleVerbosity > 0)
