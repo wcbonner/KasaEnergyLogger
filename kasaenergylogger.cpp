@@ -148,12 +148,6 @@ void KasaDecrypt(const size_t len, const uint8_t input[], uint8_t output[])
 /////////////////////////////////////////////////////////////////////////////
 // https://github.com/softScheck/tplink-smartplug/blob/master/tplink-smarthome-commands.txt
 const uint8_t KasaBroadcast[] =	"{\"system\":{\"get_sysinfo\":{}},\"emeter\":{\"get_realtime\":{}},\"smartlife.iot.common.emeter\":{\"get_realtime\":{}}}";
-const uint8_t KasaSysinfo[] =	"{\"system\":{\"get_sysinfo\":{}}}";	// Get System Info (Software & Hardware Versions, MAC, deviceID, hwID etc.)
-const uint8_t KasaEmeter[] =	"{\"emeter\":{\"get_realtime\":{}}}";	// Get Realtime Current and Voltage Reading
-const uint8_t KasaReboot[] =	"{\"system\":{\"reboot\":{\"delay\":1}}}";	// Reboot
-const uint8_t KasaReset[] =		"{\"system\":{\"reset\":{\"delay\":1}}}";	// Reset (To Factory Settings)
-const uint8_t KasaTurnOn[] =	"{\"system\":{\"set_relay_state\":{\"state\":1}}}";	// Turn On
-const uint8_t KasaTurnOff[] =	"{\"system\":{\"set_relay_state\":{\"state\":0}}}";	// Turn Off
 const uint8_t KasaWiFi[] =		"{\"netif\":{\"set_stainfo\":{\"ssid\":\"WiFi\", \"password\" : \"secret\", \"key_type\" : 3}}}";	// Connect to AP with given SSID and Password
 /////////////////////////////////////////////////////////////////////////////
 class CKasaClient {
@@ -166,8 +160,9 @@ public:
 std::string CKasaClient::GetDeviceID(void) const
 {
 	std::string DeviceID;
-	std::string devicekey("\"deviceId\"");
-	auto pos = information.find(devicekey);
+	auto pos = information.find("\"deviceId\"");
+	if (pos == std::string::npos)
+		pos = information.find("\"id\"");
 	if (pos != std::string::npos)
 	{
 		DeviceID = information.substr(pos);
@@ -249,7 +244,7 @@ void GetMRTGOutput(const std::string &DeviceID)
 		std::getline(TheFile, TheLastLine);
 		TheFile.close();
 
-		std::string powerKey("\"power\"");
+		const std::string powerKey("\"power\"");
 		double power = 0;
 		auto pos = TheLastLine.find(powerKey);
 		if (pos != std::string::npos)
@@ -264,7 +259,7 @@ void GetMRTGOutput(const std::string &DeviceID)
 			power = strtod(Value.c_str(), &pEnd);
 		}
 
-		std::string currentKey("\"current\"");
+		const std::string currentKey("\"current\"");
 		double current = 0;
 		pos = TheLastLine.find(currentKey);
 		if (pos != std::string::npos)
@@ -279,7 +274,7 @@ void GetMRTGOutput(const std::string &DeviceID)
 			current = strtod(Value.c_str(), &pEnd);
 		}
 
-		std::string voltageKey("\"voltage\"");
+		const std::string voltageKey("\"voltage\"");
 		double voltage = 0;
 		pos = TheLastLine.find(voltageKey);
 		if (pos != std::string::npos)
@@ -294,7 +289,7 @@ void GetMRTGOutput(const std::string &DeviceID)
 			voltage = strtod(Value.c_str(), &pEnd);
 		}
 
-		std::string powerKey2("\"power_mw\"");
+		const std::string powerKey2("\"power_mw\"");
 		long power_mw = 0;
 		pos = TheLastLine.find(powerKey2);
 		if (pos != std::string::npos)
@@ -308,7 +303,7 @@ void GetMRTGOutput(const std::string &DeviceID)
 			power_mw = std::stol(Value);
 		}
 
-		std::string voltageKey2("\"voltage_mv\"");
+		const std::string voltageKey2("\"voltage_mv\"");
 		long voltage_mv = 0;
 		pos = TheLastLine.find(voltageKey2);
 		if (pos != std::string::npos)
@@ -565,8 +560,9 @@ int main(int argc, char **argv)
 				{
 					if (Address.sa_family == AF_INET)
 					{
+						const uint8_t KasaSysinfo[] = "{\"system\":{\"get_sysinfo\":{}}}";	// Get System Info (Software & Hardware Versions, MAC, deviceID, hwID etc.)
 						uint8_t buffer[256] = { 0 };
-						auto bufferlen = strnlen((char *)KasaSysinfo, sizeof(buffer));
+						auto bufferlen = strnlen((const char *)KasaSysinfo, sizeof(buffer));
 						KasaEncrypt(bufferlen, KasaSysinfo, buffer);
 
 						struct sockaddr_in *sin = (struct sockaddr_in *) &Address;
@@ -593,7 +589,7 @@ int main(int argc, char **argv)
 			{
 				char buffer[8192] = { 0 };
 				KasaDecrypt(nRet, (uint8_t *)szBuf, (uint8_t *)buffer);
-				std::string ClientRequest(buffer, nRet);
+				std::string ClientResponse(buffer, nRet);
 				char ClientHostname[INET6_ADDRSTRLEN] = { 0 };
 				if (sa.sa_family == AF_INET)
 				{
@@ -606,8 +602,8 @@ int main(int argc, char **argv)
 					inet_ntop(sa.sa_family, &(foo->sin6_addr), ClientHostname, INET6_ADDRSTRLEN);
 				}
 				if (ConsoleVerbosity > 0)
-					std::cout << "[" << getTimeISO8601() << "] client (" << ClientHostname << ") says \"" << ClientRequest << "\"" << std::endl;
-				if (ClientRequest.find("\"feature\":\"TIM:ENE\"") != std::string::npos)
+					std::cout << "[" << getTimeISO8601() << "] client (" << ClientHostname << ") says \"" << ClientResponse << "\"" << std::endl;
+				if (ClientResponse.find("\"feature\":\"TIM:ENE\"") != std::string::npos)
 				{
 					// Then I want to add the device to my list to be polled for energy usage
 					CKasaClient NewClient;
@@ -615,12 +611,44 @@ int main(int argc, char **argv)
 					for (auto index = 0; index < sizeof(NewClient.address.sa_data); index++)
 						NewClient.address.sa_data[index] = sa.sa_data[index];
 					NewClient.date = CurrentTime;
-					NewClient.information = ClientRequest;
+					NewClient.information = ClientResponse;
 					std::queue<std::string> foo;
 					auto ret = KasaClients.insert(std::pair<CKasaClient, std::queue<std::string>>(NewClient, foo));
 					if (ConsoleVerbosity > 0)
 						if (ret.first->second.empty())
 							std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << std::endl;
+					if (ClientResponse.find("\"children\":[") != std::string::npos)
+					{
+						const std::string ssParentID(NewClient.GetDeviceID());
+						//here we need to parse the client request and add a new map entry for each "id"
+						std::string ssChildren(ClientResponse);
+						ssChildren.erase(0, ssChildren.find("\"children\":["));
+						ssChildren.erase(0, ssChildren.find("[")+1);
+						ssChildren.erase(ssChildren.find("]"));
+						std::string ssChild;
+						int count = 0;						
+						for (auto pos = ssChildren.begin(); pos != ssChildren.end(); pos++)
+						{
+							if (!((count == 0) && (*pos == ',')) && (*pos != '\\'))
+							{
+								if (*pos == '{')
+									count++;
+								ssChild += *pos;
+								if (*pos == '}')
+									count--;
+								if (count == 0)
+								{
+									ssChild.insert(ssChild.find("id\":\"")+5, ssParentID);
+									NewClient.information = ssChild;
+									ret = KasaClients.insert(std::pair<CKasaClient, std::queue<std::string>>(NewClient, foo));
+									if (ConsoleVerbosity > 0)
+										if (ret.first->second.empty())
+											std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << ssChild << std::endl;
+									ssChild.clear();	// http://www.cplusplus.com/reference/string/basic_string/clear/
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -667,17 +695,26 @@ int main(int argc, char **argv)
 								getnameinfo(rp->ai_addr, rp->ai_addrlen, bufHostName, sizeof(bufHostName), bufService, sizeof(bufService), 0);
 								if (ConsoleVerbosity > 0)
 									std::cout << "[" << getTimeISO8601() << "] Connected to: " << bufHostName << " Port: " << bufService;
-
-								uint8_t OutBuffer[1024] = { 0 };
-								size_t bufLen = strlen((const char*)KasaEmeter);
-								KasaEncrypt(bufLen, KasaEmeter, OutBuffer+sizeof(uint32_t));
+								std::string ssRequest("{\"emeter\":{\"get_realtime\":{}}}");
+								// If we are a child instead of a top level device, we have an "id" instead of a "deviceId" and need to format the request with context data
+								if ((Client.information.find("\"deviceId\"") == std::string::npos) && 
+									(Client.information.find("\"id\"") != std::string::npos))
+								{
+									// Need to build string in the format of: '{"emeter":{"get_realtime":{}},"context":{"child_ids":["8006842B55612405D20D69504A3F43DA1B2A969406"]}}'
+									ssRequest = "{\"emeter\":{\"get_realtime\":{}},\"context\":{\"child_ids\":[\"";
+									ssRequest += Client.GetDeviceID();
+									ssRequest += "\"]}}";
+								}
+								uint8_t OutBuffer[1024 * 2] = { 0 };
+								size_t bufLen = ssRequest.length();
+								KasaEncrypt(bufLen, (const uint8_t *)ssRequest.c_str(), OutBuffer + sizeof(uint32_t));
 								uint32_t * OutBufferLen = (uint32_t *)OutBuffer;
 								*OutBufferLen = htonl(bufLen);
 								ssize_t nRet = send(theSocket, OutBuffer, bufLen+sizeof(uint32_t), 0);
 								//if ((ConsoleVerbosity > 0) && (nRet < (bufLen + sizeof(uint32_t))))
 								//	std::cout << " not everything was sent in one go!";
 								if (ConsoleVerbosity > 0)
-									std::cout << " (" << nRet << ")=> " << KasaEmeter;
+									std::cout << " (" << nRet << ")=> " << ssRequest;
 
 								uint8_t InBuffer[1024 * 2] = { 0 };
 								//nRet = recv(theSocket, InBuffer, sizeof(InBuffer), MSG_WAITALL);
