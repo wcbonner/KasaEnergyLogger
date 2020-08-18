@@ -246,89 +246,113 @@ bool GenerateLogFile(std::map<CKasaClient, std::queue<std::string>> &KasaMap)
 /////////////////////////////////////////////////////////////////////////////
 void GetMRTGOutput(const std::string &DeviceID)
 {
+	// HACK: This next bit of getting the time formatted the same way I log it and 
+	// then converting it back to a time_t is a workaround for behavior I 
+	// currently do not understand and don't want to spend further time on now.
+	std::string ISOCurrentTime(getTimeISO8601());
+	time_t now = ISO8601totime(ISOCurrentTime);
 	std::ifstream TheFile(GenerateLogFileName(DeviceID));
 	if (TheFile.is_open())
 	{
+		std::queue<std::string> LogLines;
 		TheFile.seekg(0, std::ios_base::end);      //Start at end of file
-		char ch = ' ';                             //Init ch not equal to '\n'
-		while (ch != '\n')
+		do 
 		{
-			TheFile.seekg(-2, std::ios_base::cur); //Two steps back, this means we will NOT check the last character
-			if ((int)TheFile.tellg() <= 0)         //If passed the start of the file,
+			char ch = ' ';                             //Init ch not equal to '\n'
+			while (ch != '\n')
 			{
-				TheFile.seekg(0);                  //this is the start of the line
-				break;
+				TheFile.seekg(-2, std::ios_base::cur); //Two steps back, this means we will NOT check the last character
+				if ((int)TheFile.tellg() <= 0)         //If passed the start of the file,
+				{
+					TheFile.seekg(0);                  //this is the start of the file
+					break;
+				}
+				TheFile.get(ch);                       //Check the next character
 			}
-			TheFile.get(ch);                       //Check the next character
-		}
-		std::string TheLastLine;
-		std::getline(TheFile, TheLastLine);
+			auto FileStreamPos = TheFile.tellg(); // Save Current Stream Position
+			std::string TheLine;
+			std::getline(TheFile, TheLine);
+			auto pos = TheLine.find("\"date\"");
+			if (pos != std::string::npos)
+			{
+				// HACK: I need to clean this up..  
+				std::string Value(TheLine.substr(pos));	// value starts at key
+				Value.erase(Value.find_first_of(",}"));	// truncate value
+				Value.erase(0, Value.find(':'));	// move past key value
+				Value.erase(Value.find(':'), 1);	// move past seperator
+				Value.erase(Value.find('"'), 1);	// erase leading quote
+				Value.erase(Value.find('"'), 1);	// erase trailing quote
+				time_t DataTime = ISO8601totime(Value);
+				if (300.0 < difftime(now, DataTime))	// If this entry is more than 300 seconds from current time, it's time to stop reading log file.
+					break;
+				LogLines.push(TheLine);
+			}
+			TheFile.seekg(FileStreamPos);	// Move Stream position to where it was before reading TheLine
+		} while (TheFile.tellg() > 0);	// If we are at the beginning of the file, there's nothing more to do
 		TheFile.close();
 
-		time_t CurrentTime, DataTime = 0;
-		time(&CurrentTime);
-		auto pos = TheLastLine.find("\"date\"");
-		if (pos != std::string::npos)
+		if (!LogLines.empty())	// Only return data if we've recieved data in the last 5 minutes
 		{
-			// HACK: I need to clean this up..  
-			std::string Value(TheLastLine.substr(pos));	// value starts at key
-			Value.erase(Value.find_first_of(",}"));	// truncate value
-			Value.erase(0, Value.find(':'));	// move past key value
-			Value.erase(Value.find(':'), 1);	// move past seperator
-			Value.erase(Value.find('"'), 1);	// erase leading quote
-			Value.erase(Value.find('"'), 1);	// erase trailing quote
-			DataTime = ISO8601totime(Value);
-		}
-
-		if (difftime(CurrentTime, DataTime) < 301) // Only return data if we've recieved data in the last 5 minutes
-		{
+			long long NumElements = LogLines.size();
 			double power = 0;
-			pos = TheLastLine.find("\"power\"");
-			if (pos != std::string::npos)
-			{
-				// HACK: I need to clean this up..  
-				std::string Value(TheLastLine.substr(pos));	// value starts at key
-				Value.erase(Value.find_first_of(",}"));	// truncate value
-				Value.erase(0, Value.find(':'));	// move past key value
-				Value.erase(Value.find(':'), 1);	// move past seperator
-				power = std::stod(Value.c_str());
-			}
-
 			double voltage = 0;
-			pos = TheLastLine.find("\"voltage\"");
-			if (pos != std::string::npos)
+			long long power_mw = 0;
+			long long voltage_mv = 0;
+			while (!LogLines.empty())
 			{
-				// HACK: I need to clean this up..  
-				std::string Value(TheLastLine.substr(pos));	// value starts at key
-				Value.erase(Value.find_first_of(",}"));	// truncate value
-				Value.erase(0, Value.find(':'));	// move past key value
-				Value.erase(Value.find(':'), 1);	// move past seperator
-				voltage = std::stod(Value.c_str());
-			}
+				std::string TheLine(LogLines.front());
+				LogLines.pop();
+				auto pos = TheLine.find("\"power\"");
+				if (pos != std::string::npos)
+				{
+					// HACK: I need to clean this up..  
+					std::string Value(TheLine.substr(pos));	// value starts at key
+					Value.erase(Value.find_first_of(",}"));	// truncate value
+					Value.erase(0, Value.find(':'));	// move past key value
+					Value.erase(Value.find(':'), 1);	// move past seperator
+					power += std::stod(Value.c_str());
+				}
 
-			long power_mw = 0;
-			pos = TheLastLine.find("\"power_mw\"");
-			if (pos != std::string::npos)
-			{
-				// HACK: I need to clean this up..  
-				std::string Value(TheLastLine.substr(pos));	// value starts at key
-				Value.erase(Value.find_first_of(",}"));	// truncate value
-				Value.erase(0, Value.find(':'));	// move past key value
-				Value.erase(Value.find(':'), 1);	// move past seperator
-				power_mw = std::stol(Value);
-			}
+				pos = TheLine.find("\"voltage\"");
+				if (pos != std::string::npos)
+				{
+					// HACK: I need to clean this up..  
+					std::string Value(TheLine.substr(pos));	// value starts at key
+					Value.erase(Value.find_first_of(",}"));	// truncate value
+					Value.erase(0, Value.find(':'));	// move past key value
+					Value.erase(Value.find(':'), 1);	// move past seperator
+					voltage += std::stod(Value.c_str());
+				}
 
-			long voltage_mv = 0;
-			pos = TheLastLine.find("\"voltage_mv\"");
-			if (pos != std::string::npos)
-			{
-				// HACK: I need to clean this up..  
-				std::string Value(TheLastLine.substr(pos));	// value starts at key
-				Value.erase(Value.find_first_of(",}"));	// truncate value
-				Value.erase(0, Value.find(':'));	// move past key value
-				Value.erase(Value.find(':'), 1);	// move past seperator
-				voltage_mv = std::stol(Value);
+				pos = TheLine.find("\"power_mw\"");
+				if (pos != std::string::npos)
+				{
+					// HACK: I need to clean this up..  
+					std::string Value(TheLine.substr(pos));	// value starts at key
+					Value.erase(Value.find_first_of(",}"));	// truncate value
+					Value.erase(0, Value.find(':'));	// move past key value
+					Value.erase(Value.find(':'), 1);	// move past seperator
+					power_mw += std::stol(Value);
+				}
+
+				pos = TheLine.find("\"voltage_mv\"");
+				if (pos != std::string::npos)
+				{
+					// HACK: I need to clean this up..  
+					std::string Value(TheLine.substr(pos));	// value starts at key
+					Value.erase(Value.find_first_of(",}"));	// truncate value
+					Value.erase(0, Value.find(':'));	// move past key value
+					Value.erase(Value.find(':'), 1);	// move past seperator
+					voltage_mv += std::stol(Value);
+				}
 			}
+			// Initial Averaging of data may have overflow issues that need to be fixed. 
+			// For possible solution see https://www.geeksforgeeks.org/compute-average-two-numbers-without-overflow/ 
+			// But it would be better to use a combination with https://www.geeksforgeeks.org/average-of-a-stream-of-numbers/
+			power /= double(NumElements);
+			voltage /= double(NumElements);
+			power_mw /= NumElements;
+			voltage_mv /= NumElements;
 
 			std::cout << std::dec; // make sure I'm putting things in decimal format
 			if (power_mw != 0)
@@ -362,7 +386,7 @@ int LogFileTime = 60;
 static void usage(int argc, char **argv)
 {
 	std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
-	std::cout << "  Version 1.20200816-1 Built on: " __DATE__ " at " __TIME__ << std::endl;
+	std::cout << "  Version 1.20200818-1 Built on: " __DATE__ " at " __TIME__ << std::endl;
 	std::cout << "  Options:" << std::endl;
 	std::cout << "    -h | --help          Print this message" << std::endl;
 	std::cout << "    -l | --log name      Logging Directory [" << LogDirectory << "]" << std::endl;
@@ -402,22 +426,14 @@ int main(int argc, char **argv)
 			LogDirectory = optarg;
 			break;
 		case 't':
-			errno = 0;
-			LogFileTime = std::stoi(optarg);
-			if (errno)
-			{
-				std::cerr << optarg << " error " << errno << ", " << strerror(errno) << std::endl;
-				exit(EXIT_FAILURE);
-			}
+			try { LogFileTime = std::stoi(optarg); }
+			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
+			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
 			break;
 		case 'v':
-			errno = 0;
-			ConsoleVerbosity = std::stoi(optarg);
-			if (errno)
-			{
-				std::cerr << optarg << " error " << errno << ", " << strerror(errno) << std::endl;
-				exit(EXIT_FAILURE);
-			}
+			try { ConsoleVerbosity = std::stoi(optarg); }
+			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
+			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
 			break;
 		case 'm':
 			MRTGAddress = std::string(optarg);
@@ -721,7 +737,7 @@ int main(int argc, char **argv)
 								size_t bufLen = ssRequest.length();
 								KasaEncrypt(ssRequest, OutBuffer + sizeof(uint32_t));
 								uint32_t * OutBufferLen = (uint32_t *)OutBuffer;
-								*OutBufferLen = htonl(bufLen);
+								*OutBufferLen = htonl(uint32_t(bufLen));
 								ssize_t nRet = send(theSocket, OutBuffer, bufLen+sizeof(uint32_t), 0);
 								//if ((ConsoleVerbosity > 0) && (nRet < (bufLen + sizeof(uint32_t))))
 								//	std::cout << " not everything was sent in one go!";
@@ -766,7 +782,7 @@ int main(int argc, char **argv)
 			}
 		}
 
-		if (difftime(CurrentTime, LastLogTime) > 59) // only do this stuff every so often.
+		if (difftime(CurrentTime, LastLogTime) > LogFileTime) // only do this stuff every so often.
 		{
 			LastLogTime = CurrentTime;
 			GenerateLogFile(KasaClients);
