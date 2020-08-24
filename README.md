@@ -12,3 +12,6 @@ Discover TP-Link Kasa power devices on local network that can monitor energy. Qu
 {"date":"2020-08-16 19:08:07","deviceId":"8006C12BF70963C01E916C3F54E742CC1C0B3FAB",{"emeter":{"get_realtime":{"voltage_mv":121686,"current_ma":4,"power_mw":6,"total_wh":9,"err_code":0}}}}
 ### HS300 Child Plug
 {"date":"2020-08-16 19:07:07","deviceId":"8006C12BF70963C01E916C3F54E742CC1C0B3FAB05",{"emeter":{"get_realtime":{"voltage_mv":120509,"current_ma":64,"power_mw":5222,"total_wh":28774,"err_code":0}}}}
+
+Here's an example mrtg graph of the HS300 child plug data
+![Example MRTG Graph](https://www.wimsworld.com/mrtg/kasa_8006c12bf70963c01e916c3f54e742cc1c0b3fab05-day.png)

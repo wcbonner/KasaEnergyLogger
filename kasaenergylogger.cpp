@@ -386,7 +386,7 @@ int LogFileTime = 60;
 static void usage(int argc, char **argv)
 {
 	std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
-	std::cout << "  Version 1.20200818-1 Built on: " __DATE__ " at " __TIME__ << std::endl;
+	std::cout << "  Version 1.20200824-1 Built on: " __DATE__ " at " __TIME__ << std::endl;
 	std::cout << "  Options:" << std::endl;
 	std::cout << "    -h | --help          Print this message" << std::endl;
 	std::cout << "    -l | --log name      Logging Directory [" << LogDirectory << "]" << std::endl;
@@ -722,7 +722,7 @@ int main(int argc, char **argv)
 								char bufService[255] = { 0 };
 								getnameinfo(rp->ai_addr, rp->ai_addrlen, bufHostName, sizeof(bufHostName), bufService, sizeof(bufService), 0);
 								if (ConsoleVerbosity > 0)
-									std::cout << "[" << getTimeISO8601() << "] Connected to: " << bufHostName << " Port: " << bufService;
+									std::cout << "[" << getTimeISO8601() << "] [" << bufHostName << ":" << bufService << "]";
 								std::string ssRequest("{\"emeter\":{\"get_realtime\":{}}}");
 								// If we are a child instead of a top level device, we have an "id" instead of a "deviceId" and need to format the request with context data
 								if ((Client.information.find("\"deviceId\"") == std::string::npos) && 
@@ -734,38 +734,48 @@ int main(int argc, char **argv)
 									ssRequest += "\"]}}";
 								}
 								uint8_t OutBuffer[1024 * 2] = { 0 };
-								size_t bufLen = ssRequest.length();
 								KasaEncrypt(ssRequest, OutBuffer + sizeof(uint32_t));
 								uint32_t * OutBufferLen = (uint32_t *)OutBuffer;
-								*OutBufferLen = htonl(uint32_t(bufLen));
-								ssize_t nRet = send(theSocket, OutBuffer, bufLen+sizeof(uint32_t), 0);
-								//if ((ConsoleVerbosity > 0) && (nRet < (bufLen + sizeof(uint32_t))))
+								*OutBufferLen = htonl(ssRequest.length());
+								size_t bufLen = ssRequest.length() + sizeof(uint32_t);
+								ssize_t nRet = send(theSocket, OutBuffer, bufLen, 0);
+								//if ((ConsoleVerbosity > 0) && (nRet < bufLen))
 								//	std::cout << " not everything was sent in one go!";
 								if (ConsoleVerbosity > 0)
 									std::cout << " (" << nRet << ")=> " << ssRequest;
-
-								uint8_t InBuffer[1024 * 2] = { 0 };
-								//nRet = recv(theSocket, InBuffer, sizeof(InBuffer), MSG_WAITALL);
-								nRet = recv(theSocket, InBuffer, sizeof(InBuffer), 0);
-								if (nRet > 0)
+								if (nRet == bufLen)
 								{
-									std::string Response;
-									KasaDecrypt(nRet - sizeof(uint32_t), InBuffer + sizeof(uint32_t), Response);
-									std::ostringstream LogLine;
-									LogLine << "{\"date\":\"" << timeToExcelDate(CurrentTime) << "\",";
-									LogLine << "\"deviceId\":\"" << Client.GetDeviceID() << "\",";
-									LogLine << Response << "}";
-									it->second.push(LogLine.str());
-									if (ConsoleVerbosity > 0)
-										std::cout << " <=(" << nRet << ") " << Response;
+									uint8_t InBuffer[1024 * 2] = { 0 };
+									nRet = recv(theSocket, InBuffer, sizeof(InBuffer), 0);
+									if (nRet > 0)
+									{
+										uint32_t * InBufferLen = (uint32_t *)InBuffer;
+										size_t datasize = ntohl(*InBufferLen);
+										if (nRet == (datasize + sizeof(uint32_t)))
+										{
+											std::string Response;
+											KasaDecrypt(nRet - sizeof(uint32_t), InBuffer + sizeof(uint32_t), Response);
+											std::ostringstream LogLine;
+											LogLine << "{\"date\":\"" << timeToExcelDate(CurrentTime) << "\",";
+											LogLine << "\"deviceId\":\"" << Client.GetDeviceID() << "\",";
+											LogLine << Response << "}";
+											it->second.push(LogLine.str());
+											if (ConsoleVerbosity > 0)
+												std::cout << " <=(" << nRet << ") " << Response;
+										}
+										else
+											bRun = false; // This is a hack. I'm exiting the program on this issue and counting on systemd to restart me
+									}
+									//else if (it->second.empty())
+									//{
+									//	// If the device didn't respond, and we don't have any responses in the queue, let's remove it from the map.
+									//	if (ConsoleVerbosity > 0)
+									//		std::cout << "  No Response. Removing from map.";
+									//	KasaClients.erase(it);
+									//}
 								}
-								//else if (it->second.empty())
-								//{
-								//	// If the device didn't respond, and we don't have any responses in the queue, let's remove it from the map.
-								//	if (ConsoleVerbosity > 0)
-								//		std::cout << "  No Response. Removing from map.";
-								//	KasaClients.erase(it);
-								//}
+								else
+									bRun = false; // This is a hack. I'm exiting the program on this issue and counting on systemd to restart me
 								if (ConsoleVerbosity > 0)
 									std::cout << std::endl;
 							}
