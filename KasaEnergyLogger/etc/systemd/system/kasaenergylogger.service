@@ -2,15 +2,20 @@
 [Unit]
 Description=KasaEnergyLogger service
 After=network-online.target
-Requires=network.target
+Requires=network.target network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 Restart=always
-RestartSec=5
-ExecStart=/usr/local/bin/kasaenergylogger -v 0 -l /var/log/kasaenergylogger/
+RestartSec=10
+ExecStart=/usr/local/bin/kasaenergylogger -v 0 -l %L/kasaenergylogger/
 KillSignal=SIGINT
 
 [Install]
 WantedBy=multi-user.target
+
+# See the following links for more information
+# https://manpages.debian.org/buster/systemd/systemd.unit.5.en.html
+# https://manpages.debian.org/buster/systemd/systemd.service.5.en.html
+# https://manpages.debian.org/buster/systemd/systemd.special.7.en.html
