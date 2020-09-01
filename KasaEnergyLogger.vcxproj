@@ -82,7 +82,7 @@
     <None Include="KasaEnergyLogger\DEBIAN\postinst" />
     <None Include="KasaEnergyLogger\DEBIAN\postrm" />
     <None Include="KasaEnergyLogger\DEBIAN\prerm" />
-    <None Include="KasaEnergyLogger\etc\systemd\system\kasaenergylogger.service" />
+    <None Include="KasaEnergyLogger\usr\local\lib\systemd\system\kasaenergylogger.service" />
     <None Include="LICENSE" />
     <None Include="makefile" />
     <None Include="mrtg.cfg" />

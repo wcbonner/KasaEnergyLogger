@@ -1,4 +1,4 @@
-# Contents of /etc/systemd/system/kasaenergylogger.service
+# Contents of /usr/local/lib/systemd/system/kasaenergylogger.service
 [Unit]
 Description=KasaEnergyLogger service
 After=network-online.target
