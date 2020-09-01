@@ -13,3 +13,5 @@
 /bin/ARM/Release
 /obj/ARM/Release
 /bin/ARM/Debug
+/KasaEnergyLogger/usr/local/bin/kasaenergylogger
+/KasaEnergyLogger.deb
