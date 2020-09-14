@@ -60,7 +60,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 1.20200831-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 1.20200914-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -246,7 +246,7 @@ bool GenerateLogFile(std::map<CKasaClient, std::queue<std::string>> &KasaMap)
 	return(rval);
 }
 /////////////////////////////////////////////////////////////////////////////
-void GetMRTGOutput(const std::string &DeviceID)
+void GetMRTGOutput(const std::string &DeviceID, const int Minutes)
 {
 	// HACK: This next bit of getting the time formatted the same way I log it and 
 	// then converting it back to a time_t is a workaround for behavior I 
@@ -285,7 +285,9 @@ void GetMRTGOutput(const std::string &DeviceID)
 				Value.erase(Value.find('"'), 1);	// erase leading quote
 				Value.erase(Value.find('"'), 1);	// erase trailing quote
 				time_t DataTime = ISO8601totime(Value);
-				if (300.0 < difftime(now, DataTime))	// If this entry is more than 300 seconds from current time, it's time to stop reading log file.
+				if ((Minutes == 0) && LogLines.empty()) // HACK: Special Case to always accept the last logged value
+					LogLines.push(TheLine);
+				if ((Minutes * 60.0) < difftime(now, DataTime))	// If this entry is more than Minutes parameter from current time, it's time to stop reading log file.
 					break;
 				LogLines.push(TheLine);
 			}
@@ -385,6 +387,7 @@ void SignalHandlerSIGHUP(int signal)
 /////////////////////////////////////////////////////////////////////////////
 int ConsoleVerbosity = 1;
 int LogFileTime = 60;
+int MinutesAverage = 5;
 static void usage(int argc, char **argv)
 {
 	std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
@@ -395,6 +398,7 @@ static void usage(int argc, char **argv)
 	std::cout << "    -t | --time seconds  time between log file writes [" << LogFileTime << "]" << std::endl;
 	std::cout << "    -v | --verbose level stdout verbosity level [" << ConsoleVerbosity << "]" << std::endl;
 	std::cout << "    -m | --mrtg 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D Get last value for this deviceId" << std::endl;
+	std::cout << "    -a | --average minutes [" << MinutesAverage << "]" << std::endl;
 	std::cout << std::endl;
 }
 static const char short_options[] = "hl:t:v:m:";
@@ -404,6 +408,7 @@ static const struct option long_options[] = {
 		{ "time",   required_argument, NULL, 't' },
 		{ "verbose",required_argument, NULL, 'v' },
 		{ "mrtg",   required_argument, NULL, 'm' },
+		{ "average",required_argument, NULL, 'a' },
 		{ 0, 0, 0, 0 }
 };
 /////////////////////////////////////////////////////////////////////////////
@@ -440,6 +445,11 @@ int main(int argc, char **argv)
 		case 'm':
 			MRTGAddress = std::string(optarg);
 			break;
+		case 'a':
+			try { MinutesAverage = std::stoi(optarg); }
+			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
+			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
+			break;
 		default:
 			usage(argc, argv);
 			exit(EXIT_FAILURE);
@@ -448,7 +458,7 @@ int main(int argc, char **argv)
 	///////////////////////////////////////////////////////////////////////////////////////////////
 	if (!MRTGAddress.empty())
 	{
-		GetMRTGOutput(MRTGAddress);
+		GetMRTGOutput(MRTGAddress, MinutesAverage);
 		exit(EXIT_SUCCESS);
 	}
 	///////////////////////////////////////////////////////////////////////////////////////////////
