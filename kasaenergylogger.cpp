@@ -60,7 +60,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 1.20200914-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 1.20210317-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -96,20 +96,28 @@ std::string getTimeISO8601(void)
 
 	return(rval);
 }
-time_t ISO8601totime(const std::string & ISOTime)
+time_t ISO8601totime(const std::string& ISOTime)
 {
 	struct tm UTC;
-	UTC.tm_year = stoi(ISOTime.substr(0, 4)) - 1900;
-	UTC.tm_mon = stoi(ISOTime.substr(5, 2)) - 1;
-	UTC.tm_mday = stoi(ISOTime.substr(8, 2));
-	UTC.tm_hour = stoi(ISOTime.substr(11, 2));
-	UTC.tm_min = stoi(ISOTime.substr(14, 2));
-	UTC.tm_sec = stoi(ISOTime.substr(17, 2));
+	UTC.tm_year = stol(ISOTime.substr(0, 4)) - 1900;
+	UTC.tm_mon = stol(ISOTime.substr(5, 2)) - 1;
+	UTC.tm_mday = stol(ISOTime.substr(8, 2));
+	UTC.tm_hour = stol(ISOTime.substr(11, 2));
+	UTC.tm_min = stol(ISOTime.substr(14, 2));
+	UTC.tm_sec = stol(ISOTime.substr(17, 2));
+	UTC.tm_gmtoff = 0;
+	UTC.tm_isdst = -1;
+	UTC.tm_zone = 0;
 #ifdef _MSC_VER
 	_tzset();
 	_get_daylight(&(UTC.tm_isdst));
 #endif
+# ifdef __USE_MISC
+	time_t timer = timegm(&UTC);
+#else
 	time_t timer = mktime(&UTC);
+	timer -= timezone; // HACK: Works in my initial testing on the raspberry pi, but it's currently not DST
+#endif
 #ifdef _MSC_VER
 	long Timezone_seconds = 0;
 	_get_timezone(&Timezone_seconds);
@@ -119,6 +127,7 @@ time_t ISO8601totime(const std::string & ISOTime)
 	long DST_seconds = 0;
 	_get_dstbias(&DST_seconds);
 	timer += DST_hours * DST_seconds;
+#else
 #endif
 	return(timer);
 }

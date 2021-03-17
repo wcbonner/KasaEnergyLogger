@@ -7,10 +7,10 @@
     <RemoteTarget>1071743134;172.20.67.46 (username=, port=22, authentication=Password)</RemoteTarget>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
-    <RemoteTarget>930509390;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
+    <RemoteTarget>1469456944;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
-    <RemoteTarget>930509390;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
+    <RemoteTarget>1469456944;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <RemoteTarget>930509390;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
