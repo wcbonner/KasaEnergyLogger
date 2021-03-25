@@ -60,7 +60,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 1.20210317-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210325-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -217,6 +217,16 @@ bool operator <(const CKasaClient &a, const CKasaClient &b)
 }
 /////////////////////////////////////////////////////////////////////////////
 std::string LogDirectory("./");
+std::string SVGDirectory;	// If this remains empty, SVG Files are not created. If it's specified, _day, _week, _month, and _year.svg files are created for each address seen.
+bool ValidateDirectory(std::string& DirectoryName)
+{
+	//TODO: I want to make sure the dorectory name ends with a "/"
+	if (DirectoryName.back() != '/')
+		DirectoryName += '/';
+	//TODO: I want to make sure the dorectory exists
+	//TODO: I want to make sure the dorectory is writable by the current user
+	return(true);
+}
 std::string GenerateLogFileName(const std::string &DeviceID)
 {
 	std::ostringstream OutputFilename;
@@ -408,9 +418,10 @@ static void usage(int argc, char **argv)
 	std::cout << "    -v | --verbose level stdout verbosity level [" << ConsoleVerbosity << "]" << std::endl;
 	std::cout << "    -m | --mrtg 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D Get last value for this deviceId" << std::endl;
 	std::cout << "    -a | --average minutes [" << MinutesAverage << "]" << std::endl;
+	std::cout << "    -s | --svg name      SVG output directory" << std::endl;
 	std::cout << std::endl;
 }
-static const char short_options[] = "hl:t:v:m:";
+static const char short_options[] = "hl:t:v:m:a:s:";
 static const struct option long_options[] = {
 		{ "help",   no_argument,       NULL, 'h' },
 		{ "log",    required_argument, NULL, 'l' },
@@ -418,6 +429,7 @@ static const struct option long_options[] = {
 		{ "verbose",required_argument, NULL, 'v' },
 		{ "mrtg",   required_argument, NULL, 'm' },
 		{ "average",required_argument, NULL, 'a' },
+		{ "svg",	required_argument, NULL, 's' },
 		{ 0, 0, 0, 0 }
 };
 /////////////////////////////////////////////////////////////////////////////
@@ -458,6 +470,11 @@ int main(int argc, char **argv)
 			try { MinutesAverage = std::stoi(optarg); }
 			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
 			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
+			break;
+		case 's':
+			SVGDirectory = std::string(optarg);
+			if (!ValidateDirectory(SVGDirectory))
+				SVGDirectory.clear();
 			break;
 		default:
 			usage(argc, argv);
