@@ -30,6 +30,9 @@
 #include <cstdio>
 #include <ctime>
 #include <csignal>
+#include <cmath>
+#include <climits>
+#include <cfloat>
 #include <string>
 #include <iostream>
 #include <locale>
@@ -50,6 +53,9 @@
 #include <netdb.h>			// For gethostbyname()
 #include <sys/ioctl.h>
 #include <getopt.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <utime.h>
 /////////////////////////////////////////////////////////////////////////////
 // URLs with information:
 // https://www.softscheck.com/en/reverse-engineering-tp-link-hs110/
@@ -267,6 +273,12 @@ public:
 		VoltsMax = v;
 		Averages = 1;
 	};
+	double GetWatts(void) const { return(Watts); };
+	double GetWattsMin(void) const { return(std::min(Watts, WattsMin)); };
+	double GetWattsMax(void) const { return(std::max(Watts, WattsMax)); };
+	double GetVolts(void) const { return(Volts); };
+	double GetVoltsMin(void) const { return(std::min(Volts, VoltsMin)); };
+	double GetVoltsMax(void) const { return(std::max(Volts, VoltsMax)); };
 	enum granularity { day, week, month, year };
 	void NormalizeTime(granularity type);
 	granularity GetTimeGranularity(void) const;
@@ -502,6 +514,286 @@ void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
 			{
 				YearSampleFirst->SetMinMax(*iter);
 				iter++;
+			}
+		}
+	}
+}
+// Returns a curated vector of data points specific to the requested graph type from the internal memory structure map keyed off the Bluetooth address.
+void ReadMRTGData(const std::string& TheDeviceID, std::vector<CKASAReading>& TheValues, const GraphType graph = GraphType::daily)
+{
+	auto it = KasaMRTGLogs.find(TheDeviceID);
+	if (it != KasaMRTGLogs.end())
+	{
+		if (it->second.size() > 0)
+		{
+			auto DaySampleFirst = it->second.begin() + 2;
+			auto DaySampleLast = it->second.begin() + 1 + DAY_COUNT;
+			auto WeekSampleFirst = it->second.begin() + 2 + DAY_COUNT;
+			auto WeekSampleLast = it->second.begin() + 1 + DAY_COUNT + WEEK_COUNT;
+			auto MonthSampleFirst = it->second.begin() + 2 + DAY_COUNT + WEEK_COUNT;
+			auto MonthSampleLast = it->second.begin() + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT;
+			auto YearSampleFirst = it->second.begin() + 2 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT;
+			auto YearSampleLast = it->second.begin() + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT + YEAR_COUNT;
+			if (graph == GraphType::daily)
+			{
+				TheValues.resize(DAY_COUNT);
+				std::copy(DaySampleFirst, DaySampleLast, TheValues.begin());
+				auto iter = TheValues.begin();
+				while (iter->IsValid() && (iter != TheValues.end()))
+					iter++;
+				TheValues.resize(iter - TheValues.begin());
+				*(TheValues.begin()) = *(it->second.begin()); //HACK: include the most recent time sample
+			}
+			else if (graph == GraphType::weekly)
+			{
+				TheValues.resize(WEEK_COUNT);
+				std::copy(WeekSampleFirst, WeekSampleLast, TheValues.begin());
+				auto iter = TheValues.begin();
+				while (iter->IsValid() && (iter != TheValues.end()))
+					iter++;
+				TheValues.resize(iter - TheValues.begin());
+			}
+			else if (graph == GraphType::monthly)
+			{
+				TheValues.resize(MONTH_COUNT);
+				std::copy(MonthSampleFirst, MonthSampleLast, TheValues.begin());
+				auto iter = TheValues.begin();
+				while (iter->IsValid() && (iter != TheValues.end()))
+					iter++;
+				TheValues.resize(iter - TheValues.begin());
+			}
+			else if (graph == GraphType::yearly)
+			{
+				TheValues.resize(YEAR_COUNT);
+				std::copy(YearSampleFirst, YearSampleLast, TheValues.begin());
+				auto iter = TheValues.begin();
+				while (iter->IsValid() && (iter != TheValues.end()))
+					iter++;
+				TheValues.resize(iter - TheValues.begin());
+			}
+		}
+	}
+}
+// Interesting ideas about SVG and possible tools to look at: https://blog.usejournal.com/of-svg-minification-and-gzip-21cd26a5d007
+// Tools Mentioned: svgo gzthermal https://github.com/subzey/svg-gz-supplement/
+// Takes a curated vector of data points for a specific graph type and writes a SVG file to disk.
+void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileName, const std::string& Title = "", const GraphType graph = GraphType::daily, const bool MinMax = false)
+{
+	// By declaring these items here, I'm then basing all my other dimensions on these
+	const int SVGWidth = 500;
+	const int SVGHeight = 135;
+	const int FontSize = 12;
+	const int TickSize = 2;
+	int GraphWidth = SVGWidth - (FontSize * 7);
+	if (!TheValues.empty())
+	{
+		struct stat64 SVGStat;
+		SVGStat.st_mtim.tv_sec = 0;
+		if (-1 == stat64(SVGFileName.c_str(), &SVGStat))
+			if (ConsoleVerbosity > 0)
+				perror(SVGFileName.c_str());
+		//std::cout << "[" << getTimeISO8601() << "] stat returned error on : " << SVGFileName << std::endl;
+		if (TheValues.begin()->Time > SVGStat.st_mtim.tv_sec)	// only write the file if we have new data
+		{
+			std::ofstream SVGFile(SVGFileName);
+			if (SVGFile.is_open())
+			{
+				if (ConsoleVerbosity > 0)
+					std::cout << "[" << getTimeISO8601() << "] Writing: " << SVGFileName << " With Title: " << Title << std::endl;
+				else
+					std::cerr << "Writing: " << SVGFileName << " With Title: " << Title << std::endl;
+				std::ostringstream tempOString;
+				tempOString << "Watts (" << std::fixed << std::setprecision(1) << TheValues[0].GetWatts() << ")";
+				std::string YLegendTemperature(tempOString.str());
+				tempOString = std::ostringstream();
+				tempOString << "Volts (" << std::fixed << std::setprecision(1) << TheValues[0].GetVolts() << ")";
+				std::string YLegendHumidity(tempOString.str());
+				int GraphTop = FontSize + TickSize;
+				int GraphBottom = SVGHeight - GraphTop;
+				int GraphRight = SVGWidth - (GraphTop * 2) - 2;
+				int GraphLeft = GraphRight - GraphWidth;
+				int GraphVerticalDivision = (GraphBottom - GraphTop) / 4;
+				double WattsMin = DBL_MAX;
+				double WattsMax = DBL_MIN;
+				double VoltsMin = DBL_MAX;
+				double VoltsMax = DBL_MIN;
+				for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+				{
+					WattsMin = std::min(WattsMin, TheValues[index].GetWattsMin());
+					WattsMax = std::max(WattsMax, TheValues[index].GetWattsMax());
+					VoltsMin = std::min(VoltsMin, TheValues[index].GetVoltsMin());
+					VoltsMax = std::max(VoltsMax, TheValues[index].GetVoltsMax());
+				}
+				double WattsVerticalDivision = (WattsMax - WattsMin) / 4;
+				double WattsVerticalFactor = (GraphBottom - GraphTop) / (WattsMax - WattsMin);
+				double VoltsVerticalDivision = (VoltsMax - VoltsMin) / 4;
+				double VoltsVerticalFactor = (GraphBottom - GraphTop) / (VoltsMax - VoltsMin);
+
+				SVGFile << "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?>" << std::endl;
+				SVGFile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"" << SVGWidth << "\" height=\"" << SVGHeight << "\">" << std::endl;
+				SVGFile << "\t<!-- Created by: " << ProgramVersionString << " -->" << std::endl;
+				SVGFile << "\t<style>" << std::endl;
+				SVGFile << "\t\ttext { font-family: sans-serif; font-size: " << FontSize << "px; fill: black; }" << std::endl;
+				SVGFile << "\t\tline { stroke: black; }" << std::endl;
+				SVGFile << "\t\tpolygon { fill-opacity: 0.5; }" << std::endl;
+				SVGFile << "\t@media only screen and (prefers-color-scheme: dark) {" << std::endl;
+				SVGFile << "\t\ttext { fill: grey; }" << std::endl;
+				SVGFile << "\t\tline { stroke: grey; }" << std::endl;
+				SVGFile << "\t}" << std::endl;
+				SVGFile << "\t</style>" << std::endl;
+				SVGFile << "\t<rect style=\"fill-opacity:0;stroke:grey;stroke-width:2\" width=\"" << SVGWidth << "\" height=\"" << SVGHeight << "\" />" << std::endl;
+
+				// Legend Text
+				SVGFile << "\t<text x=\"" << GraphLeft << "\" y=\"" << GraphTop - 2 << "\">" << Title << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"text-anchor:end\" x=\"" << GraphRight << "\" y=\"" << GraphTop - 2 << "\">" << timeToExcelLocal(TheValues[0].Time) << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:middle\" x=\"" << FontSize << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendTemperature << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green;text-anchor:middle\" x=\"" << FontSize * 2 << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize * 2 << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendHumidity << "</text>" << std::endl;
+
+				if (MinMax)
+				{
+					SVGFile << "\t<!-- Watts Max -->" << std::endl;
+					SVGFile << "\t<polygon style=\"fill:lime;stroke:green\" points=\"";
+					SVGFile << GraphLeft + 1 << "," << GraphBottom - 1 << " ";
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((WattsMax - TheValues[index].GetWattsMax()) * WattsVerticalFactor) + GraphTop) << " ";
+					if (GraphWidth < TheValues.size())
+						SVGFile << GraphRight - 1 << "," << GraphBottom - 1;
+					else
+						SVGFile << GraphRight - (GraphWidth - TheValues.size()) << "," << GraphBottom - 1;
+					SVGFile << "\" />" << std::endl;
+					SVGFile << "\t<!-- Watts Min -->" << std::endl;
+					SVGFile << "\t<polygon style=\"fill:lime;stroke:green\" points=\"";
+					SVGFile << GraphLeft + 1 << "," << GraphBottom - 1 << " ";
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((WattsMax - TheValues[index].GetWattsMin()) * WattsVerticalFactor) + GraphTop) << " ";
+					if (GraphWidth < TheValues.size())
+						SVGFile << GraphRight - 1 << "," << GraphBottom - 1;
+					else
+						SVGFile << GraphRight - (GraphWidth - TheValues.size()) << "," << GraphBottom - 1;
+					SVGFile << "\" />" << std::endl;
+				}
+				else
+				{
+					// Humidity Graphic as a Filled polygon
+					SVGFile << "\t<!-- Watts -->" << std::endl;
+					SVGFile << "\t<polygon style=\"fill:lime;stroke:green\" points=\"";
+					SVGFile << GraphLeft + 1 << "," << GraphBottom - 1 << " ";
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((WattsMax - TheValues[index].GetWatts()) * WattsVerticalFactor) + GraphTop) << " ";
+					if (GraphWidth < TheValues.size())
+						SVGFile << GraphRight - 1 << "," << GraphBottom - 1;
+					else
+						SVGFile << GraphRight - (GraphWidth - TheValues.size()) << "," << GraphBottom - 1;
+					SVGFile << "\" />" << std::endl;
+				}
+
+				// Top Line
+				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop << "\"/>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 5 << "\">" << std::fixed << std::setprecision(1) << WattsMax << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 << "\">" << std::fixed << std::setprecision(1) << VoltsMax << "</text>" << std::endl;
+
+				// Bottom Line
+				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphBottom << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphBottom + 5 << "\">" << std::fixed << std::setprecision(1) << WattsMin << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphBottom + 4 << "\">" << std::fixed << std::setprecision(1) << VoltsMin << "</text>" << std::endl;
+
+				// Left Line
+				SVGFile << "\t<line x1=\"" << GraphLeft << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
+
+				// Right Line
+				SVGFile << "\t<line x1=\"" << GraphRight << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphRight << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
+
+				// Vertical Division Dashed Lines
+				for (auto index = 1; index < 4; index++)
+				{
+					SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop + (GraphVerticalDivision * index) << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop + (GraphVerticalDivision * index) << "\" />" << std::endl;
+					SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << WattsMax - (WattsVerticalDivision * index) << "</text>" << std::endl;
+					SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << VoltsMax - (VoltsVerticalDivision * index) << "</text>" << std::endl;
+				}
+
+				// Horizontal Division Dashed Lines
+				for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+				{
+					struct tm UTC;
+					if (0 != localtime_r(&TheValues[index].Time, &UTC))
+					{
+						if (graph == GraphType::daily)
+						{
+							if (UTC.tm_min == 0)
+							{
+								if (UTC.tm_hour == 0)
+									SVGFile << "\t<line style=\"stroke:red\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+								else
+									SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+								if (UTC.tm_hour % 2 == 0)
+									SVGFile << "\t<text style=\"text-anchor:middle\" x=\"" << GraphLeft + index << "\" y=\"" << SVGHeight - 2 << "\">" << UTC.tm_hour << "</text>" << std::endl;
+							}
+						}
+						else if (graph == GraphType::weekly)
+						{
+							const std::string Weekday[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+							if ((UTC.tm_hour == 0) && (UTC.tm_min == 0))
+							{
+								if (UTC.tm_wday == 1)
+									SVGFile << "\t<line style=\"stroke:red\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+								else
+									SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							}
+							else if ((UTC.tm_hour == 12) && (UTC.tm_min == 0))
+								SVGFile << "\t<text style=\"text-anchor:middle\" x=\"" << GraphLeft + index << "\" y=\"" << SVGHeight - 2 << "\">" << Weekday[UTC.tm_wday] << "</text>" << std::endl;
+						}
+						else if (graph == GraphType::monthly)
+						{
+							if ((UTC.tm_mday == 1) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<line style=\"stroke:red\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							if ((UTC.tm_wday == 0) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							else if ((UTC.tm_wday == 3) && (UTC.tm_hour == 12) && (UTC.tm_min == 0))
+								SVGFile << "\t<text style=\"text-anchor:middle\" x=\"" << GraphLeft + index << "\" y=\"" << SVGHeight - 2 << "\">Week " << UTC.tm_yday / 7 + 1 << "</text>" << std::endl;
+						}
+						else if (graph == GraphType::yearly)
+						{
+							const std::string Month[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+							if ((UTC.tm_yday == 0) && (UTC.tm_mday == 1) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<line style=\"stroke:red\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							else if ((UTC.tm_mday == 1) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							else if ((UTC.tm_mday == 15) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<text style=\"text-anchor:middle\" x=\"" << GraphLeft + index << "\" y=\"" << SVGHeight - 2 << "\">" << Month[UTC.tm_mon] << "</text>" << std::endl;
+						}
+					}
+				}
+
+				// Directional Arrow
+				SVGFile << "\t<polygon style=\"fill:red;stroke:red;fill-opacity:1;\" points=\"" << GraphLeft - 3 << "," << GraphBottom << " " << GraphLeft + 3 << "," << GraphBottom - 3 << " " << GraphLeft + 3 << "," << GraphBottom + 3 << "\" />" << std::endl;
+
+				if (MinMax)
+				{
+					// Temperature Values as a filled polygon showing the minimum and maximum
+					SVGFile << "\t<!-- Temperature MinMax -->" << std::endl;
+					SVGFile << "\t<polygon style=\"fill:blue;stroke:blue\" points=\"";
+					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((VoltsMax - TheValues[index].GetVoltsMax()) * VoltsVerticalFactor) + GraphTop) << " ";
+					for (auto index = (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()) - 1; index > 0; index--)
+						SVGFile << index + GraphLeft << "," << int(((VoltsMax - TheValues[index].GetVoltsMin()) * VoltsVerticalFactor) + GraphTop) << " ";
+					SVGFile << "\" />" << std::endl;
+				}
+				else
+				{
+					// Temperature Values as a continuous line
+					SVGFile << "\t<!-- Temperature -->" << std::endl;
+					SVGFile << "\t<polyline style=\"fill:none;stroke:blue\" points=\"";
+					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((VoltsMax - TheValues[index].GetVolts()) * VoltsVerticalFactor) + GraphTop) << " ";
+					SVGFile << "\" />" << std::endl;
+				}
+
+				SVGFile << "</svg>" << std::endl;
+				SVGFile.close();
+				struct utimbuf SVGut;
+				SVGut.actime = TheValues.begin()->Time;
+				SVGut.modtime = TheValues.begin()->Time;
+				utime(SVGFileName.c_str(), &SVGut);
 			}
 		}
 	}
