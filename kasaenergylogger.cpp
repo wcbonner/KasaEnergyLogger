@@ -60,7 +60,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210325-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210405-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -154,6 +154,27 @@ std::string timeToExcelDate(const time_t & TheTime)
 	}
 	return(ExcelDate.str());
 }
+std::string timeToExcelLocal(const time_t& TheTime)
+{
+	std::ostringstream ExcelDate;
+	struct tm UTC;
+	if (0 != localtime_r(&TheTime, &UTC))
+	{
+		ExcelDate.fill('0');
+		ExcelDate << UTC.tm_year + 1900 << "-";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_mon + 1 << "-";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_mday << " ";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_hour << ":";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_min << ":";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_sec;
+	}
+	return(ExcelDate.str());
+}
 /////////////////////////////////////////////////////////////////////////////
 void KasaEncrypt(const std::string &input, uint8_t * output)
 {
@@ -216,8 +237,276 @@ bool operator <(const CKasaClient &a, const CKasaClient &b)
 	return(AdeviceId.compare(BdeviceId) < 0);
 }
 /////////////////////////////////////////////////////////////////////////////
+int ConsoleVerbosity = 1;
 std::string LogDirectory("./");
 std::string SVGDirectory;	// If this remains empty, SVG Files are not created. If it's specified, _day, _week, _month, and _year.svg files are created for each address seen.
+int SVGMinMax = 0; // 0x01 = Draw Temperature and Humiditiy Minimum and Maximum line on daily, 0x02 = on weekly, 0x04 = on monthly, 0x08 = on yearly
+// The following details were taken from https://github.com/oetiker/mrtg
+const size_t DAY_COUNT = 600;			/* 400 samples is 33.33 hours */
+const size_t WEEK_COUNT = 600;			/* 400 samples is 8.33 days */
+const size_t MONTH_COUNT = 600;			/* 400 samples is 33.33 days */
+const size_t YEAR_COUNT = 2 * 366;		/* 1 sample / day, 366 days, 2 years */
+const size_t DAY_SAMPLE = 5 * 60;		/* Sample every 5 minutes */
+const size_t WEEK_SAMPLE = 30 * 60;		/* Sample every 30 minutes */
+const size_t MONTH_SAMPLE = 2 * 60 * 60;/* Sample every 2 hours */
+const size_t YEAR_SAMPLE = 24 * 60 * 60;/* Sample every 24 hours */
+/////////////////////////////////////////////////////////////////////////////
+// Class I'm using for storing power usage data from the Kasa devices
+class  CKASAReading {
+public:
+	time_t Time;
+	CKASAReading() : Time(0), Watts(0), WattsMin(0), WattsMax(0), Volts(0), VoltsMin(0), VoltsMax(0), Averages(0) { };
+	CKASAReading(const time_t tim, const double w, const double v)
+	{
+		Time = tim;
+		Watts = w;
+		WattsMin = w;
+		WattsMax = w;
+		Volts = v;
+		VoltsMin = v;
+		VoltsMax = v;
+		Averages = 1;
+	};
+	enum granularity { day, week, month, year };
+	void NormalizeTime(granularity type);
+	granularity GetTimeGranularity(void) const;
+	bool IsValid(void) const { return(Averages > 0); };
+	bool ReadMSG(const std::string data);
+	void SetMinMax(const CKASAReading& a);
+	friend CKASAReading Average(const CKASAReading& a, const CKASAReading& b);
+protected:
+	double Watts;
+	double WattsMin;
+	double WattsMax;
+	double Volts;
+	double VoltsMin;
+	double VoltsMax;
+	int Averages;
+};
+void CKASAReading::NormalizeTime(granularity type)
+{
+	if (type == day)
+		Time = (Time / DAY_SAMPLE) * DAY_SAMPLE;
+	else if (type == week)
+		Time = (Time / WEEK_SAMPLE) * WEEK_SAMPLE;
+	else if (type == month)
+		Time = (Time / MONTH_SAMPLE) * MONTH_SAMPLE;
+	else if (type == year)
+	{
+		struct tm UTC;
+		if (0 != localtime_r(&Time, &UTC))
+		{
+			UTC.tm_hour = 0;
+			UTC.tm_min = 0;
+			UTC.tm_sec = 0;
+			Time = mktime(&UTC);
+		}
+	}
+}
+CKASAReading::granularity CKASAReading::GetTimeGranularity(void) const
+{
+	granularity rval = granularity::day;
+	struct tm UTC;
+	if (0 != localtime_r(&Time, &UTC))
+	{
+		//if (((UTC.tm_hour == 0) && (UTC.tm_min == 0)) || ((UTC.tm_hour == 23) && (UTC.tm_min == 0) && (UTC.tm_isdst == 1)))
+		if ((UTC.tm_hour == 0) && (UTC.tm_min == 0))
+			rval = granularity::year;
+		else if ((UTC.tm_hour % 2 == 0) && (UTC.tm_min == 0))
+			rval = granularity::month;
+		else if ((UTC.tm_min == 0) || (UTC.tm_min == 30))
+			rval = granularity::week;
+	}
+	return(rval);
+}
+bool CKASAReading::ReadMSG(const std::string TheLine)
+{
+	bool rval = false;
+	double power = 0;
+	double voltage = 0;
+	long long power_mw = 0;
+	long long voltage_mv = 0;
+	auto pos = TheLine.find("\"power\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		power += std::stod(Value.c_str());
+	}
+
+	pos = TheLine.find("\"voltage\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		voltage += std::stod(Value.c_str());
+	}
+
+	pos = TheLine.find("\"power_mw\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		power_mw += std::stol(Value);
+	}
+
+	pos = TheLine.find("\"voltage_mv\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		voltage_mv += std::stol(Value);
+	}
+	if (power_mw != 0)
+		Watts = power_mw;
+	else
+		Watts = power * 1000.0;
+	if (voltage_mv != 0)
+		Volts = voltage_mv;
+	else
+		Volts = voltage * 1000.0;
+
+}
+void CKASAReading::SetMinMax(const CKASAReading& a)
+{
+	WattsMin = WattsMin < Watts ? WattsMin : Watts;
+	WattsMax = WattsMax > Watts ? WattsMax : Watts;
+
+	WattsMin = WattsMin < a.WattsMin ? WattsMin : a.WattsMin;
+	WattsMax = WattsMax > a.WattsMax ? WattsMax : a.WattsMax;
+
+	VoltsMin = VoltsMin < Volts ? VoltsMin : Volts;
+	VoltsMax = VoltsMax > Volts ? VoltsMax : Volts;
+
+	VoltsMin = VoltsMin < a.VoltsMin ? VoltsMin : a.VoltsMin;
+	VoltsMax = VoltsMax > a.VoltsMax ? VoltsMax : a.VoltsMax;
+}
+CKASAReading Average(const CKASAReading& a, const CKASAReading& b)
+{
+	CKASAReading rval(a);
+	rval.Time = a.Time < b.Time ? a.Time : b.Time; // Use the minimum time (oldest time)
+	rval.Averages = a.Averages + b.Averages; // existing average + new average
+	rval.Watts = ((a.Watts * a.Averages) + (b.Watts * b.Averages)) / rval.Averages;
+	rval.WattsMin = a.WattsMin < b.WattsMin ? a.WattsMin : b.WattsMin;
+	rval.WattsMax = a.WattsMax > b.WattsMax ? a.WattsMax : b.WattsMax;
+	rval.WattsMin = a.Watts < a.WattsMin ? a.Watts : a.WattsMin;
+	rval.WattsMax = a.Watts > a.WattsMax ? a.Watts : a.WattsMax;
+	rval.Volts = ((a.Volts * a.Averages) + (b.Volts * b.Averages)) / rval.Averages;
+	rval.VoltsMin = a.VoltsMin < b.VoltsMin ? a.VoltsMin : b.VoltsMin;
+	rval.VoltsMax = a.VoltsMax > b.VoltsMax ? a.VoltsMax : b.VoltsMax;
+	rval.VoltsMin = a.Volts < a.VoltsMin ? a.Volts : a.VoltsMin;
+	rval.VoltsMax = a.Volts > a.VoltsMax ? a.Volts : a.VoltsMax;
+	rval = a; // HACK: Averaging still needs work, just use first value passed
+	return(rval);
+}
+/////////////////////////////////////////////////////////////////////////////
+std::map<std::string, std::vector<CKASAReading>> KasaMRTGLogs; // memory map of BT addresses and vector structure similar to MRTG Log Files
+std::map<std::string, std::string> KasaTitles;
+enum class GraphType { daily, weekly, monthly, yearly };
+void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
+{
+	std::vector<CKASAReading> foo;
+	auto ret = KasaMRTGLogs.insert(std::pair<std::string, std::vector<CKASAReading>>(TheDeviceID, foo));
+	std::vector<CKASAReading>& FakeMRTGFile = ret.first->second;
+	if (FakeMRTGFile.empty())
+	{
+		FakeMRTGFile.resize(2 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT + YEAR_COUNT);
+		FakeMRTGFile[0] = TheValue;	// current value
+		FakeMRTGFile[1] = TheValue;
+		for (auto index = 0; index < DAY_COUNT; index++)
+			FakeMRTGFile[index + 2].Time = FakeMRTGFile[index + 1].Time - DAY_SAMPLE;
+		for (auto index = 0; index < WEEK_COUNT; index++)
+			FakeMRTGFile[index + 2 + DAY_COUNT].Time = FakeMRTGFile[index + 1 + DAY_COUNT].Time - WEEK_SAMPLE;
+		for (auto index = 0; index < MONTH_COUNT; index++)
+			FakeMRTGFile[index + 2 + DAY_COUNT + WEEK_COUNT].Time = FakeMRTGFile[index + 1 + DAY_COUNT + WEEK_COUNT].Time - MONTH_SAMPLE;
+		for (auto index = 0; index < YEAR_COUNT; index++)
+			FakeMRTGFile[index + 2 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT].Time = FakeMRTGFile[index + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT].Time - YEAR_SAMPLE;
+	}
+	else
+	{
+		FakeMRTGFile[0] = TheValue;	// current value
+		FakeMRTGFile[1] = Average(FakeMRTGFile[0], FakeMRTGFile[1]); // averaged value up to DAY_SAMPLE size
+	}
+	auto DaySampleFirst = FakeMRTGFile.begin() + 2;
+	auto DaySampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT;
+	auto WeekSampleFirst = FakeMRTGFile.begin() + 2 + DAY_COUNT;
+	auto WeekSampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT + WEEK_COUNT;
+	auto MonthSampleFirst = FakeMRTGFile.begin() + 2 + DAY_COUNT + WEEK_COUNT;
+	auto MonthSampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT;
+	auto YearSampleFirst = FakeMRTGFile.begin() + 2 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT;
+	auto YearSampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT + YEAR_COUNT;
+	// For every time difference between FakeMRTGFile[1] and FakeMRTGFile[2] that's greater than DAY_SAMPLE we shift that data towards the back.
+	while (difftime(FakeMRTGFile[1].Time, DaySampleFirst->Time) > DAY_SAMPLE)
+	{
+		// shuffle all the day samples toward the end
+		std::copy_backward(DaySampleFirst, DaySampleLast - 1, DaySampleLast);
+		*DaySampleFirst = FakeMRTGFile[1];
+		DaySampleFirst->NormalizeTime(CKASAReading::granularity::day);
+		if (difftime(DaySampleFirst->Time, (DaySampleFirst + 1)->Time) > DAY_SAMPLE)
+			DaySampleFirst->Time = (DaySampleFirst + 1)->Time + DAY_SAMPLE;
+		if (DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::year)
+		{
+			if (ConsoleVerbosity > 1)
+				std::cout << "[" << getTimeISO8601() << "] shuffling year " << timeToExcelLocal(DaySampleFirst->Time) << " > " << timeToExcelLocal(YearSampleFirst->Time) << std::endl;
+			// shuffle all the year samples toward the end
+			std::copy_backward(YearSampleFirst, YearSampleLast - 1, YearSampleLast);
+			*YearSampleFirst = *DaySampleFirst;
+
+			auto iter = DaySampleFirst;
+			while (iter->IsValid() && ((iter - DaySampleFirst) < (12 * 24))) // One Day of day samples
+			{
+				YearSampleFirst->SetMinMax(*iter);
+				iter++;
+			}
+		}
+		if ((DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::year) ||
+			(DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::month))
+		{
+			if (ConsoleVerbosity > 1)
+				std::cout << "[" << getTimeISO8601() << "] shuffling month " << timeToExcelLocal(DaySampleFirst->Time) << std::endl;
+			// shuffle all the month samples toward the end
+			std::copy_backward(MonthSampleFirst, MonthSampleLast - 1, MonthSampleLast);
+			*MonthSampleFirst = *DaySampleFirst;
+
+			auto iter = DaySampleFirst;
+			while (iter->IsValid() && ((iter - DaySampleFirst) < (12 * 2))) // two hours of day samples
+			{
+				MonthSampleFirst->SetMinMax(*iter);
+				iter++;
+			}
+		}
+		if ((DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::year) ||
+			(DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::month) ||
+			(DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::week))
+		{
+			if (ConsoleVerbosity > 1)
+				std::cout << "[" << getTimeISO8601() << "] shuffling week " << timeToExcelLocal(DaySampleFirst->Time) << std::endl;
+			// shuffle all the month samples toward the end
+			std::copy_backward(WeekSampleFirst, WeekSampleLast - 1, WeekSampleLast);
+			*WeekSampleFirst = *DaySampleFirst;
+
+			auto iter = DaySampleFirst;
+			while (iter->IsValid() && ((iter - DaySampleFirst) < 6)) // Half an hour of day samples
+			{
+				YearSampleFirst->SetMinMax(*iter);
+				iter++;
+			}
+		}
+	}
+}
+/////////////////////////////////////////////////////////////////////////////
 bool ValidateDirectory(std::string& DirectoryName)
 {
 	//TODO: I want to make sure the dorectory name ends with a "/"
@@ -404,7 +693,6 @@ void SignalHandlerSIGHUP(int signal)
 	std::cerr << "***************** SIGHUP: Caught HangUp, finishing loop and quitting. *****************" << std::endl;
 }
 /////////////////////////////////////////////////////////////////////////////
-int ConsoleVerbosity = 1;
 int LogFileTime = 60;
 int MinutesAverage = 5;
 static void usage(int argc, char **argv)
