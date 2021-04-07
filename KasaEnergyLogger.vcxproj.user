@@ -21,4 +21,8 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <RemoteTarget>930509390;WimPi4-dev.local (username=, port=22, authentication=PrivateKey)</RemoteTarget>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
+    <RemoteDebuggerCommandArguments>--svg /mnt/c/Users/Wim/Source/Repos/KasaEnergyLogger/SVG/</RemoteDebuggerCommandArguments>
+    <DebuggerFlavor>LinuxWSLDebugger</DebuggerFlavor>
+  </PropertyGroup>
 </Project>

@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210405-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210407-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -279,6 +279,7 @@ public:
 	double GetVolts(void) const { return(Volts); };
 	double GetVoltsMin(void) const { return(std::min(Volts, VoltsMin)); };
 	double GetVoltsMax(void) const { return(std::max(Volts, VoltsMax)); };
+	std::string GetDeviceID(void) const { return(DeviceID); };
 	enum granularity { day, week, month, year };
 	void NormalizeTime(granularity type);
 	granularity GetTimeGranularity(void) const;
@@ -294,6 +295,7 @@ protected:
 	double VoltsMin;
 	double VoltsMax;
 	int Averages;
+	std::string DeviceID;
 };
 void CKASAReading::NormalizeTime(granularity type)
 {
@@ -333,12 +335,40 @@ CKASAReading::granularity CKASAReading::GetTimeGranularity(void) const
 }
 bool CKASAReading::ReadMSG(const std::string TheLine)
 {
-	bool rval = false;
+	// TheLine	"{\"date\":\"2021-04-07 20:31:54\",\"deviceId\":\"8006C12BF70963C01E916C3F54E742CC1C0B3FAB01\",{\"emeter\":{\"get_realtime\":{\"voltage_mv\":121553,\"current_ma\":104,\"power_mw\":8276,\"total_wh\":87245,\"err_code\":0}}}}"	const std::__cxx11::string
+	bool rval = true;
+	Averages = 1;
 	double power = 0;
 	double voltage = 0;
 	long long power_mw = 0;
 	long long voltage_mv = 0;
-	auto pos = TheLine.find("\"power\"");
+	auto pos = TheLine.find("\"date\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		Value.erase(Value.find('"'), 1);
+		Value.erase(Value.find('"'), 1);
+		Time = ISO8601totime(Value);
+	}
+
+	pos = TheLine.find("\"deviceId\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		Value.erase(Value.find('"'), 1);
+		Value.erase(Value.find('"'), 1);
+		DeviceID = Value;
+	}
+
+	pos = TheLine.find("\"power\"");
 	if (pos != std::string::npos)
 	{
 		// HACK: I need to clean this up..  
@@ -382,13 +412,13 @@ bool CKASAReading::ReadMSG(const std::string TheLine)
 		voltage_mv += std::stol(Value);
 	}
 	if (power_mw != 0)
-		Watts = power_mw;
+		Watts = power_mw / 1000.0;
 	else
 		Watts = power * 1000.0;
 	if (voltage_mv != 0)
-		Volts = voltage_mv;
+		Volts = voltage_mv / 1000.0;
 	else
-		Volts = voltage * 1000.0;
+		Volts = voltage;
 
 }
 void CKASAReading::SetMinMax(const CKASAReading& a)
@@ -603,11 +633,11 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				else
 					std::cerr << "Writing: " << SVGFileName << " With Title: " << Title << std::endl;
 				std::ostringstream tempOString;
-				tempOString << "Watts (" << std::fixed << std::setprecision(1) << TheValues[0].GetWatts() << ")";
-				std::string YLegendTemperature(tempOString.str());
+				tempOString << "Watts (" << std::setprecision(2) << TheValues[0].GetWatts() << ")";
+				std::string YLegendWatts(tempOString.str());
 				tempOString = std::ostringstream();
-				tempOString << "Volts (" << std::fixed << std::setprecision(1) << TheValues[0].GetVolts() << ")";
-				std::string YLegendHumidity(tempOString.str());
+				tempOString << "Volts (" << std::fixed << std::setprecision(2) << TheValues[0].GetVolts() << ")";
+				std::string YLegendVolts(tempOString.str());
 				int GraphTop = FontSize + TickSize;
 				int GraphBottom = SVGHeight - GraphTop;
 				int GraphRight = SVGWidth - (GraphTop * 2) - 2;
@@ -646,8 +676,8 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				// Legend Text
 				SVGFile << "\t<text x=\"" << GraphLeft << "\" y=\"" << GraphTop - 2 << "\">" << Title << "</text>" << std::endl;
 				SVGFile << "\t<text style=\"text-anchor:end\" x=\"" << GraphRight << "\" y=\"" << GraphTop - 2 << "\">" << timeToExcelLocal(TheValues[0].Time) << "</text>" << std::endl;
-				SVGFile << "\t<text style=\"fill:blue;text-anchor:middle\" x=\"" << FontSize << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendTemperature << "</text>" << std::endl;
-				SVGFile << "\t<text style=\"fill:green;text-anchor:middle\" x=\"" << FontSize * 2 << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize * 2 << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendHumidity << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:middle\" x=\"" << FontSize << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendVolts << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green;text-anchor:middle\" x=\"" << FontSize * 2 << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize * 2 << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendWatts << "</text>" << std::endl;
 
 				if (MinMax)
 				{
@@ -674,7 +704,7 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				}
 				else
 				{
-					// Humidity Graphic as a Filled polygon
+					// Watts Graphic as a Filled polygon
 					SVGFile << "\t<!-- Watts -->" << std::endl;
 					SVGFile << "\t<polygon style=\"fill:lime;stroke:green\" points=\"";
 					SVGFile << GraphLeft + 1 << "," << GraphBottom - 1 << " ";
@@ -689,13 +719,13 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 
 				// Top Line
 				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop << "\"/>" << std::endl;
-				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 5 << "\">" << std::fixed << std::setprecision(1) << WattsMax << "</text>" << std::endl;
-				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 << "\">" << std::fixed << std::setprecision(1) << VoltsMax << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 5 << "\">" << std::fixed << std::setprecision(1) << VoltsMax << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 << "\">" << std::fixed << std::setprecision(1) << WattsMax << "</text>" << std::endl;
 
 				// Bottom Line
 				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphBottom << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
-				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphBottom + 5 << "\">" << std::fixed << std::setprecision(1) << WattsMin << "</text>" << std::endl;
-				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphBottom + 4 << "\">" << std::fixed << std::setprecision(1) << VoltsMin << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphBottom + 5 << "\">" << std::fixed << std::setprecision(1) << VoltsMin << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphBottom + 4 << "\">" << std::fixed << std::setprecision(1) << WattsMin << "</text>" << std::endl;
 
 				// Left Line
 				SVGFile << "\t<line x1=\"" << GraphLeft << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
@@ -707,8 +737,8 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				for (auto index = 1; index < 4; index++)
 				{
 					SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop + (GraphVerticalDivision * index) << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop + (GraphVerticalDivision * index) << "\" />" << std::endl;
-					SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << WattsMax - (WattsVerticalDivision * index) << "</text>" << std::endl;
-					SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << VoltsMax - (VoltsVerticalDivision * index) << "</text>" << std::endl;
+					SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << VoltsMax - (VoltsVerticalDivision * index) << "</text>" << std::endl;
+					SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << WattsMax - (WattsVerticalDivision * index) << "</text>" << std::endl;
 				}
 
 				// Horizontal Division Dashed Lines
@@ -769,8 +799,8 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 
 				if (MinMax)
 				{
-					// Temperature Values as a filled polygon showing the minimum and maximum
-					SVGFile << "\t<!-- Temperature MinMax -->" << std::endl;
+					// Volts Values as a filled polygon showing the minimum and maximum
+					SVGFile << "\t<!-- Volts MinMax -->" << std::endl;
 					SVGFile << "\t<polygon style=\"fill:blue;stroke:blue\" points=\"";
 					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
 						SVGFile << index + GraphLeft << "," << int(((VoltsMax - TheValues[index].GetVoltsMax()) * VoltsVerticalFactor) + GraphTop) << " ";
@@ -780,8 +810,8 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				}
 				else
 				{
-					// Temperature Values as a continuous line
-					SVGFile << "\t<!-- Temperature -->" << std::endl;
+					// Volts Values as a continuous line
+					SVGFile << "\t<!-- Volts -->" << std::endl;
 					SVGFile << "\t<polyline style=\"fill:none;stroke:blue\" points=\"";
 					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
 						SVGFile << index + GraphLeft << "," << int(((VoltsMax - TheValues[index].GetVolts()) * VoltsVerticalFactor) + GraphTop) << " ";
@@ -796,6 +826,47 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				utime(SVGFileName.c_str(), &SVGut);
 			}
 		}
+	}
+}
+void WriteAllSVG()
+{
+	//ReadTitleMap();
+	for (auto it = KasaMRTGLogs.begin(); it != KasaMRTGLogs.end(); it++)
+	{
+		std::string DeviceID(it->first);
+		std::string ssTitle(DeviceID);
+		if (KasaTitles.find(DeviceID) != KasaTitles.end())
+			ssTitle = KasaTitles.find(DeviceID)->second;
+		std::ostringstream OutputFilename;
+		OutputFilename.str("");
+		OutputFilename << SVGDirectory;
+		OutputFilename << "kasa-";
+		OutputFilename << DeviceID;
+		OutputFilename << "-day.svg";
+		std::vector<CKASAReading> TheValues;
+		ReadMRTGData(DeviceID, TheValues, GraphType::daily);
+		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::daily, SVGMinMax & 0x01);
+		OutputFilename.str("");
+		OutputFilename << SVGDirectory;
+		OutputFilename << "kasa-";
+		OutputFilename << DeviceID;
+		OutputFilename << "-week.svg";
+		ReadMRTGData(DeviceID, TheValues, GraphType::weekly);
+		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::weekly, SVGMinMax & 0x02);
+		OutputFilename.str("");
+		OutputFilename << SVGDirectory;
+		OutputFilename << "kasa-";
+		OutputFilename << DeviceID;
+		OutputFilename << "-month.svg";
+		ReadMRTGData(DeviceID, TheValues, GraphType::monthly);
+		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::monthly, SVGMinMax & 0x04);
+		OutputFilename.str("");
+		OutputFilename << SVGDirectory;
+		OutputFilename << "kasa-";
+		OutputFilename << DeviceID;
+		OutputFilename << "-year.svg";
+		ReadMRTGData(DeviceID, TheValues, GraphType::yearly);
+		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::yearly, SVGMinMax & 0x08);
 	}
 }
 /////////////////////////////////////////////////////////////////////////////
@@ -844,6 +915,52 @@ bool GenerateLogFile(std::map<CKasaClient, std::queue<std::string>> &KasaMap)
 		}
 	}
 	return(rval);
+}
+void ReadLoggedData(const std::string& filename)
+{
+	if (ConsoleVerbosity > 0)
+		std::cout << "[" << getTimeISO8601() << "] Reading: " << filename << std::endl;
+	else
+		std::cerr << "Reading: " << filename << std::endl;
+	std::ifstream TheFile(filename);
+	if (TheFile.is_open())
+	{
+		std::string TheLine;
+		while (std::getline(TheFile, TheLine))
+		{
+			CKASAReading theReading;
+			if (theReading.ReadMSG(TheLine))
+				UpdateMRTGData(theReading.GetDeviceID(), theReading);
+		}
+		TheFile.close();
+	}
+}
+// Finds log files specific to this program then reads the contents into the memory mapped structure simulating MRTG log files.
+void ReadLoggedData(void)
+{
+	DIR* dp;
+	if ((dp = opendir(LogDirectory.c_str())) != NULL)
+	{
+		std::deque<std::string> files;
+		struct dirent* dirp;
+		while ((dirp = readdir(dp)) != NULL)
+			if (DT_REG == dirp->d_type)
+			{
+				std::string filename = LogDirectory + std::string(dirp->d_name);
+				if ((filename.substr(LogDirectory.size(), 4) == "kasa") && (filename.substr(filename.size() - 4, 4) == ".txt"))
+					files.push_back(filename);
+			}
+		closedir(dp);
+		if (!files.empty())
+		{
+			sort(files.begin(), files.end());
+			while (!files.empty())
+			{
+				ReadLoggedData(*files.begin());
+				files.pop_front();
+			}
+		}
+	}
 }
 /////////////////////////////////////////////////////////////////////////////
 void GetMRTGOutput(const std::string &DeviceID, const int Minutes)
@@ -1116,8 +1233,11 @@ int main(int argc, char **argv)
 	time_t LastBroadcastTime = 0;
 	time_t LastLogTime = 0;
 	time_t DisplayTime = 0;
+	time_t TimeSVG = 0;
 	std::vector<struct sockaddr> BroadcastAddresses;
 	std::map<CKasaClient, std::queue<std::string>> KasaClients;
+
+	ReadLoggedData();
 
 	// Loop until we get a Ctrl-C
 	while (bRun)
@@ -1293,6 +1413,19 @@ int main(int argc, char **argv)
 										if (ret.first->second.empty())
 											std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << ssChild << std::endl;
 									ssChild.clear();	// http://www.cplusplus.com/reference/string/basic_string/clear/
+									// This adds reported alias information to the TitleMap
+									std::string Title(NewClient.information);
+									auto pos = Title.find("\"alias\"");
+									if (pos != std::string::npos)
+									{
+										Title.erase(0, pos);
+										Title.erase(Title.find_first_of(",}"));	// truncate value
+										Title.erase(0, Title.find(':'));	// move past key value
+										Title.erase(Title.find(':'), 1);	// move past seperator
+										Title.erase(Title.find('"'), 1);
+										Title.erase(Title.find('"'), 1);
+										KasaTitles.insert(std::pair<std::string, std::string>(NewClient.GetDeviceID(), Title));
+									}
 								}
 							}
 						}
@@ -1382,6 +1515,9 @@ int main(int argc, char **argv)
 											it->second.push(LogLine.str());
 											if (ConsoleVerbosity > 0)
 												std::cout << " <=(" << nRet << ") " << Response;
+											CKASAReading theReading;
+											if (theReading.ReadMSG(LogLine.str()))
+												UpdateMRTGData(theReading.GetDeviceID(), theReading);
 										}
 										else
 											bRun = false; // This is a hack. I'm exiting the program on this issue and counting on systemd to restart me
@@ -1417,7 +1553,13 @@ int main(int argc, char **argv)
 			LastLogTime = CurrentTime;
 			GenerateLogFile(KasaClients);
 		}
-			
+
+		if ((!SVGDirectory.empty()) && (difftime(CurrentTime, TimeSVG) > DAY_SAMPLE))
+		{
+			WriteAllSVG();
+			TimeSVG = (CurrentTime / DAY_SAMPLE) * DAY_SAMPLE; // hack to try to line up TimeSVG to be on a five minute period
+		}
+
 		usleep(100); // sleep for 100 microseconds (0.1 ms)
 		if (ConsoleVerbosity > 0)
 			if (difftime(CurrentTime, DisplayTime) > 0) // update display if it's been over a second
