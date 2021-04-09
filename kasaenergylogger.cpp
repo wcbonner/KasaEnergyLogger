@@ -261,30 +261,22 @@ const size_t YEAR_SAMPLE = 24 * 60 * 60;/* Sample every 24 hours */
 class  CKASAReading {
 public:
 	time_t Time;
-	CKASAReading() : Time(0), Watts(0), WattsMin(0), WattsMax(0), Volts(0), VoltsMin(0), VoltsMax(0), Averages(0) { };
-	CKASAReading(const time_t tim, const double w, const double v)
-	{
-		Time = tim;
-		Watts = w;
-		WattsMin = w;
-		WattsMax = w;
-		Volts = v;
-		VoltsMin = v;
-		VoltsMax = v;
-		Averages = 1;
-	};
+	CKASAReading() : Time(0), Watts(0), WattsMin(DBL_MAX), WattsMax(DBL_MIN), Volts(0), VoltsMin(DBL_MAX), VoltsMax(DBL_MIN), Amps(0), AmpsMin(DBL_MAX), AmpsMax(DBL_MIN), Averages(0) { };
+	CKASAReading(const std::string data);
 	double GetWatts(void) const { return(Watts); };
 	double GetWattsMin(void) const { return(std::min(Watts, WattsMin)); };
 	double GetWattsMax(void) const { return(std::max(Watts, WattsMax)); };
 	double GetVolts(void) const { return(Volts); };
 	double GetVoltsMin(void) const { return(std::min(Volts, VoltsMin)); };
 	double GetVoltsMax(void) const { return(std::max(Volts, VoltsMax)); };
+	double GetAmps(void) const { return(Amps); };
+	double GetAmpsMin(void) const { return(std::min(Amps, AmpsMin)); };
+	double GetAmpsMax(void) const { return(std::max(Amps, AmpsMax)); };
 	std::string GetDeviceID(void) const { return(DeviceID); };
 	enum granularity { day, week, month, year };
 	void NormalizeTime(granularity type);
 	granularity GetTimeGranularity(void) const;
 	bool IsValid(void) const { return(Averages > 0); };
-	bool ReadMSG(const std::string data);
 	void SetMinMax(const CKASAReading& a);
 	friend CKASAReading Average(const CKASAReading& a, const CKASAReading& b);
 protected:
@@ -294,6 +286,9 @@ protected:
 	double Volts;
 	double VoltsMin;
 	double VoltsMax;
+	double Amps;
+	double AmpsMin;
+	double AmpsMax;
 	int Averages;
 	std::string DeviceID;
 };
@@ -333,15 +328,15 @@ CKASAReading::granularity CKASAReading::GetTimeGranularity(void) const
 	}
 	return(rval);
 }
-bool CKASAReading::ReadMSG(const std::string TheLine)
+CKASAReading::CKASAReading(const std::string TheLine)
 {
 	// TheLine	"{\"date\":\"2021-04-07 20:31:54\",\"deviceId\":\"8006C12BF70963C01E916C3F54E742CC1C0B3FAB01\",{\"emeter\":{\"get_realtime\":{\"voltage_mv\":121553,\"current_ma\":104,\"power_mw\":8276,\"total_wh\":87245,\"err_code\":0}}}}"	const std::__cxx11::string
-	bool rval = true;
 	Averages = 1;
 	double power = 0;
 	double voltage = 0;
 	long long power_mw = 0;
 	long long voltage_mv = 0;
+	long long current_ma = 0;
 	auto pos = TheLine.find("\"date\"");
 	if (pos != std::string::npos)
 	{
@@ -411,15 +406,30 @@ bool CKASAReading::ReadMSG(const std::string TheLine)
 		Value.erase(Value.find(':'), 1);	// move past seperator
 		voltage_mv += std::stol(Value);
 	}
+
+	pos = TheLine.find("\"current_ma\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		current_ma += std::stol(Value);
+	}
+
 	if (power_mw != 0)
 		Watts = power_mw / 1000.0;
 	else
 		Watts = power * 1000.0;
+
 	if (voltage_mv != 0)
 		Volts = voltage_mv / 1000.0;
 	else
 		Volts = voltage;
 
+	if (current_ma != 0)
+		Amps = current_ma / 1000.0;
 }
 void CKASAReading::SetMinMax(const CKASAReading& a)
 {
@@ -928,8 +938,8 @@ void ReadLoggedData(const std::string& filename)
 		std::string TheLine;
 		while (std::getline(TheFile, TheLine))
 		{
-			CKASAReading theReading;
-			if (theReading.ReadMSG(TheLine))
+			CKASAReading theReading(TheLine);
+			if (theReading.IsValid())
 				UpdateMRTGData(theReading.GetDeviceID(), theReading);
 		}
 		TheFile.close();
@@ -1515,8 +1525,8 @@ int main(int argc, char **argv)
 											it->second.push(LogLine.str());
 											if (ConsoleVerbosity > 0)
 												std::cout << " <=(" << nRet << ") " << Response;
-											CKASAReading theReading;
-											if (theReading.ReadMSG(LogLine.str()))
+											CKASAReading theReading(LogLine.str());
+											if (theReading.IsValid())
 												UpdateMRTGData(theReading.GetDeviceID(), theReading);
 										}
 										else
