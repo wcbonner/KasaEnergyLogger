@@ -958,7 +958,15 @@ void ReadLoggedData(void)
 			{
 				std::string filename = LogDirectory + std::string(dirp->d_name);
 				if ((filename.substr(LogDirectory.size(), 4) == "kasa") && (filename.substr(filename.size() - 4, 4) == ".txt"))
+				{
+					auto fullname = realpath(filename.c_str(), NULL);
+					if (fullname != NULL)
+					{
+						filename = fullname;
+						free(fullname);
+					}
 					files.push_back(filename);
+				}
 			}
 		closedir(dp);
 		if (!files.empty())
