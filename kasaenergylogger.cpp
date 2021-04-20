@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210420-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210420-2 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -881,7 +881,7 @@ void WriteAllSVG()
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::daily, SVGMinMax & 0x01);
 #ifdef DEBUG
 		if (IndexFile.is_open())
-			IndexFile << "<DIV class=\"image\"><img alt=\"Graph\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << "\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
 #endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
@@ -892,7 +892,7 @@ void WriteAllSVG()
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::weekly, SVGMinMax & 0x02);
 #ifdef DEBUG
 		if (IndexFile.is_open())
-			IndexFile << "<DIV class=\"image\"><img alt=\"Graph\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << "\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
 #endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
@@ -903,7 +903,7 @@ void WriteAllSVG()
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::monthly, SVGMinMax & 0x04);
 #ifdef DEBUG
 		if (IndexFile.is_open())
-			IndexFile << "<DIV class=\"image\"><img alt=\"Graph\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << "\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
 #endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
@@ -914,7 +914,7 @@ void WriteAllSVG()
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::yearly, SVGMinMax & 0x08);
 #ifdef DEBUG
 		if (IndexFile.is_open())
-			IndexFile << "<DIV class=\"image\"><img alt=\"Graph\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << "\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
 #endif // DEBUG
 	}
 
@@ -1450,6 +1450,22 @@ int main(int argc, char **argv)
 					if (ConsoleVerbosity > 0)
 						if (ret.first->second.empty())
 							std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << std::endl;
+
+					// This adds reported alias information to the TitleMap
+					std::string Title(NewClient.information);
+					auto pos = Title.find("\"alias\"");
+					if (pos != std::string::npos)
+					{
+						Title.erase(0, pos);
+						Title.erase(Title.find_first_of(",}"));	// truncate value
+						Title.erase(0, Title.find(':'));	// move past key value
+						Title.erase(Title.find(':'), 1);	// move past seperator
+						Title.erase(Title.find('"'), 1);
+						Title.erase(Title.find('"'), 1);
+						KasaTitles.insert(std::pair<std::string, std::string>(NewClient.GetDeviceID(), Title));
+					}
+
+
 					if (ClientResponse.find("\"children\":[") != std::string::npos)
 					{
 						const std::string ssParentID(NewClient.GetDeviceID());
