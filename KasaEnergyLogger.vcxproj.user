@@ -25,4 +25,8 @@
     <RemoteDebuggerCommandArguments>--svg /mnt/c/Users/Wim/Source/Repos/KasaEnergyLogger/SVG/</RemoteDebuggerCommandArguments>
     <DebuggerFlavor>LinuxWSLDebugger</DebuggerFlavor>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
+    <RemoteDebuggerCommandArguments>--svg /mnt/c/Users/Wim/Source/Repos/KasaEnergyLogger/SVG/</RemoteDebuggerCommandArguments>
+    <DebuggerFlavor>LinuxWSLDebugger</DebuggerFlavor>
+  </PropertyGroup>
 </Project>

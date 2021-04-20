@@ -18,3 +18,5 @@
 /bin/x86/Debug
 /obj/x86/Debug
 /SVG
+/bin/x86/Release
+/obj/x86/Release

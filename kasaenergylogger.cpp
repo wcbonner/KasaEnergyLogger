@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210407-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210420-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -729,12 +729,12 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 
 				// Top Line
 				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop << "\"/>" << std::endl;
-				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 5 << "\">" << std::fixed << std::setprecision(1) << AmpsMax << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 5 << "\">" << std::fixed << std::setprecision(2) << AmpsMax << "</text>" << std::endl;
 				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 << "\">" << std::fixed << std::setprecision(1) << WattsMax << "</text>" << std::endl;
 
 				// Bottom Line
 				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphBottom << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
-				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphBottom + 5 << "\">" << std::fixed << std::setprecision(1) << AmpsMin << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphBottom + 5 << "\">" << std::fixed << std::setprecision(2) << AmpsMin << "</text>" << std::endl;
 				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphBottom + 4 << "\">" << std::fixed << std::setprecision(1) << WattsMin << "</text>" << std::endl;
 
 				// Left Line
@@ -747,7 +747,7 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				for (auto index = 1; index < 4; index++)
 				{
 					SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop + (GraphVerticalDivision * index) << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop + (GraphVerticalDivision * index) << "\" />" << std::endl;
-					SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << AmpsMax - (AmpsVerticalDivision * index) << "</text>" << std::endl;
+					SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(2) << AmpsMax - (AmpsVerticalDivision * index) << "</text>" << std::endl;
 					SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << WattsMax - (WattsVerticalDivision * index) << "</text>" << std::endl;
 				}
 
@@ -1547,9 +1547,7 @@ int main(int argc, char **argv)
 									(Client.information.find("\"id\"") != std::string::npos))
 								{
 									// Need to build string in the format of: '{"emeter":{"get_realtime":{}},"context":{"child_ids":["8006842B55612405D20D69504A3F43DA1B2A969406"]}}'
-									ssRequest = "{\"emeter\":{\"get_realtime\":{}},\"context\":{\"child_ids\":[\"";
-									ssRequest += Client.GetDeviceID();
-									ssRequest += "\"]}}";
+									ssRequest = "{\"emeter\":{\"get_realtime\":{}},\"context\":{\"child_ids\":[\"" + Client.GetDeviceID() + "\"]}}";
 								}
 								uint8_t OutBuffer[1024 * 2] = { 0 };
 								KasaEncrypt(ssRequest, OutBuffer + sizeof(uint32_t));
