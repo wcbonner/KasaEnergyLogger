@@ -419,17 +419,17 @@ CKASAReading::CKASAReading(const std::string TheLine)
 	}
 
 	if (power_mw != 0)
-		Watts = power_mw / 1000.0;
+		Watts = WattsMin = WattsMax = power_mw / 1000.0;
 	else
-		Watts = power * 1000.0;
+		Watts = WattsMin = WattsMax = power * 1000.0;
 
 	if (voltage_mv != 0)
-		Volts = voltage_mv / 1000.0;
+		Volts = VoltsMin = VoltsMax = voltage_mv / 1000.0;
 	else
-		Volts = voltage;
+		Volts = VoltsMin = VoltsMax = voltage;
 
 	if (current_ma != 0)
-		Amps = current_ma / 1000.0;
+		Amps = AmpsMin = AmpsMax = current_ma / 1000.0;
 }
 void CKASAReading::SetMinMax(const CKASAReading& a)
 {
@@ -646,8 +646,8 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				tempOString << "Watts (" << std::setprecision(2) << TheValues[0].GetWatts() << ")";
 				std::string YLegendWatts(tempOString.str());
 				tempOString = std::ostringstream();
-				tempOString << "Volts (" << std::fixed << std::setprecision(2) << TheValues[0].GetVolts() << ")";
-				std::string YLegendVolts(tempOString.str());
+				tempOString << "Amps (" << std::fixed << std::setprecision(2) << TheValues[0].GetAmps() << ")";
+				std::string YLegendAmps(tempOString.str());
 				int GraphTop = FontSize + TickSize;
 				int GraphBottom = SVGHeight - GraphTop;
 				int GraphRight = SVGWidth - (GraphTop * 2) - 2;
@@ -655,19 +655,19 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				int GraphVerticalDivision = (GraphBottom - GraphTop) / 4;
 				double WattsMin = DBL_MAX;
 				double WattsMax = DBL_MIN;
-				double VoltsMin = DBL_MAX;
-				double VoltsMax = DBL_MIN;
+				double AmpsMin = DBL_MAX;
+				double AmpsMax = DBL_MIN;
 				for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
 				{
 					WattsMin = std::min(WattsMin, TheValues[index].GetWattsMin());
 					WattsMax = std::max(WattsMax, TheValues[index].GetWattsMax());
-					VoltsMin = std::min(VoltsMin, TheValues[index].GetVoltsMin());
-					VoltsMax = std::max(VoltsMax, TheValues[index].GetVoltsMax());
+					AmpsMin = std::min(AmpsMin, TheValues[index].GetAmpsMin());
+					AmpsMax = std::max(AmpsMax, TheValues[index].GetAmpsMax());
 				}
 				double WattsVerticalDivision = (WattsMax - WattsMin) / 4;
 				double WattsVerticalFactor = (GraphBottom - GraphTop) / (WattsMax - WattsMin);
-				double VoltsVerticalDivision = (VoltsMax - VoltsMin) / 4;
-				double VoltsVerticalFactor = (GraphBottom - GraphTop) / (VoltsMax - VoltsMin);
+				double AmpsVerticalDivision = (AmpsMax - AmpsMin) / 4;
+				double AmpsVerticalFactor = (GraphBottom - GraphTop) / (AmpsMax - AmpsMin);
 
 				SVGFile << "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?>" << std::endl;
 				SVGFile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"" << SVGWidth << "\" height=\"" << SVGHeight << "\">" << std::endl;
@@ -686,7 +686,7 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				// Legend Text
 				SVGFile << "\t<text x=\"" << GraphLeft << "\" y=\"" << GraphTop - 2 << "\">" << Title << "</text>" << std::endl;
 				SVGFile << "\t<text style=\"text-anchor:end\" x=\"" << GraphRight << "\" y=\"" << GraphTop - 2 << "\">" << timeToExcelLocal(TheValues[0].Time) << "</text>" << std::endl;
-				SVGFile << "\t<text style=\"fill:blue;text-anchor:middle\" x=\"" << FontSize << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendVolts << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:middle\" x=\"" << FontSize << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendAmps << "</text>" << std::endl;
 				SVGFile << "\t<text style=\"fill:green;text-anchor:middle\" x=\"" << FontSize * 2 << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize * 2 << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendWatts << "</text>" << std::endl;
 
 				if (MinMax)
@@ -729,12 +729,12 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 
 				// Top Line
 				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop << "\"/>" << std::endl;
-				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 5 << "\">" << std::fixed << std::setprecision(1) << VoltsMax << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 5 << "\">" << std::fixed << std::setprecision(1) << AmpsMax << "</text>" << std::endl;
 				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 << "\">" << std::fixed << std::setprecision(1) << WattsMax << "</text>" << std::endl;
 
 				// Bottom Line
 				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphBottom << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
-				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphBottom + 5 << "\">" << std::fixed << std::setprecision(1) << VoltsMin << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphBottom + 5 << "\">" << std::fixed << std::setprecision(1) << AmpsMin << "</text>" << std::endl;
 				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphBottom + 4 << "\">" << std::fixed << std::setprecision(1) << WattsMin << "</text>" << std::endl;
 
 				// Left Line
@@ -747,7 +747,7 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				for (auto index = 1; index < 4; index++)
 				{
 					SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop + (GraphVerticalDivision * index) << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop + (GraphVerticalDivision * index) << "\" />" << std::endl;
-					SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << VoltsMax - (VoltsVerticalDivision * index) << "</text>" << std::endl;
+					SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << AmpsMax - (AmpsVerticalDivision * index) << "</text>" << std::endl;
 					SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::fixed << std::setprecision(1) << WattsMax - (WattsVerticalDivision * index) << "</text>" << std::endl;
 				}
 
@@ -809,22 +809,22 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 
 				if (MinMax)
 				{
-					// Volts Values as a filled polygon showing the minimum and maximum
-					SVGFile << "\t<!-- Volts MinMax -->" << std::endl;
+					// Amps Values as a filled polygon showing the minimum and maximum
+					SVGFile << "\t<!-- Amps MinMax -->" << std::endl;
 					SVGFile << "\t<polygon style=\"fill:blue;stroke:blue\" points=\"";
 					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
-						SVGFile << index + GraphLeft << "," << int(((VoltsMax - TheValues[index].GetVoltsMax()) * VoltsVerticalFactor) + GraphTop) << " ";
+						SVGFile << index + GraphLeft << "," << int(((AmpsMax - TheValues[index].GetAmpsMax()) * AmpsVerticalFactor) + GraphTop) << " ";
 					for (auto index = (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()) - 1; index > 0; index--)
-						SVGFile << index + GraphLeft << "," << int(((VoltsMax - TheValues[index].GetVoltsMin()) * VoltsVerticalFactor) + GraphTop) << " ";
+						SVGFile << index + GraphLeft << "," << int(((AmpsMax - TheValues[index].GetAmpsMin()) * AmpsVerticalFactor) + GraphTop) << " ";
 					SVGFile << "\" />" << std::endl;
 				}
 				else
 				{
-					// Volts Values as a continuous line
-					SVGFile << "\t<!-- Volts -->" << std::endl;
+					// Amps Values as a continuous line
+					SVGFile << "\t<!-- Amps -->" << std::endl;
 					SVGFile << "\t<polyline style=\"fill:none;stroke:blue\" points=\"";
 					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
-						SVGFile << index + GraphLeft << "," << int(((VoltsMax - TheValues[index].GetVolts()) * VoltsVerticalFactor) + GraphTop) << " ";
+						SVGFile << index + GraphLeft << "," << int(((AmpsMax - TheValues[index].GetAmps()) * AmpsVerticalFactor) + GraphTop) << " ";
 					SVGFile << "\" />" << std::endl;
 				}
 
@@ -840,6 +840,29 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 }
 void WriteAllSVG()
 {
+#ifdef DEBUG
+	std::ofstream IndexFile;
+	std::ostringstream IndexFilename;
+	IndexFilename << SVGDirectory;
+	IndexFilename << "index.html";
+	IndexFile.open(IndexFilename.str());
+	if (IndexFile.is_open())
+	{
+		IndexFile << "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">" << std::endl;
+		IndexFile << "<HTML>" << std::endl;
+		IndexFile << "<HEAD>" << std::endl;
+		IndexFile << "<style type=\"text/css\">" << std::endl;
+		IndexFile << "\tbody { color: black; }" << std::endl;
+		IndexFile << "\th3 { position: absolute; top: 0px; left: 90px; }" << std::endl;
+		IndexFile << "\t.image { float: left; position: relative; zoom: 85%; }" << std::endl;
+		IndexFile << "\t@media only screen and (max-width: 980px) { .image { float: left; position: relative; zoom: 190%; } }" << std::endl;
+		IndexFile << "\t@media screen and (prefers-color-scheme: dark) { body { background-color: black; color: white; } }" << std::endl;
+		IndexFile << "</style>" << std::endl;
+		IndexFile << "</HEAD>" << std::endl;
+		IndexFile << "<BODY>" << std::endl;
+	}
+#endif // DEBUG
+
 	//ReadTitleMap();
 	for (auto it = KasaMRTGLogs.begin(); it != KasaMRTGLogs.end(); it++)
 	{
@@ -856,6 +879,10 @@ void WriteAllSVG()
 		std::vector<CKASAReading> TheValues;
 		ReadMRTGData(DeviceID, TheValues, GraphType::daily);
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::daily, SVGMinMax & 0x01);
+#ifdef DEBUG
+		if (IndexFile.is_open())
+			IndexFile << "<DIV class=\"image\"><img alt=\"Graph\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+#endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
 		OutputFilename << "kasa-";
@@ -863,6 +890,10 @@ void WriteAllSVG()
 		OutputFilename << "-week.svg";
 		ReadMRTGData(DeviceID, TheValues, GraphType::weekly);
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::weekly, SVGMinMax & 0x02);
+#ifdef DEBUG
+		if (IndexFile.is_open())
+			IndexFile << "<DIV class=\"image\"><img alt=\"Graph\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+#endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
 		OutputFilename << "kasa-";
@@ -870,6 +901,10 @@ void WriteAllSVG()
 		OutputFilename << "-month.svg";
 		ReadMRTGData(DeviceID, TheValues, GraphType::monthly);
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::monthly, SVGMinMax & 0x04);
+#ifdef DEBUG
+		if (IndexFile.is_open())
+			IndexFile << "<DIV class=\"image\"><img alt=\"Graph\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+#endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
 		OutputFilename << "kasa-";
@@ -877,7 +912,19 @@ void WriteAllSVG()
 		OutputFilename << "-year.svg";
 		ReadMRTGData(DeviceID, TheValues, GraphType::yearly);
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::yearly, SVGMinMax & 0x08);
+#ifdef DEBUG
+		if (IndexFile.is_open())
+			IndexFile << "<DIV class=\"image\"><img alt=\"Graph\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+#endif // DEBUG
 	}
+
+#ifdef DEBUG
+	if (IndexFile.is_open())
+	{
+		IndexFile << "</BODY>" << std::endl;
+		IndexFile.close();
+	}
+#endif // DEBUG
 }
 /////////////////////////////////////////////////////////////////////////////
 bool ValidateDirectory(std::string& DirectoryName)
