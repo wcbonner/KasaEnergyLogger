@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210420-3 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210421-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -278,7 +278,7 @@ public:
 	granularity GetTimeGranularity(void) const;
 	bool IsValid(void) const { return(Averages > 0); };
 	void SetMinMax(const CKASAReading& a);
-	friend CKASAReading Average(const CKASAReading& a, const CKASAReading& b);
+	CKASAReading& operator +=(const CKASAReading &b);
 protected:
 	double Watts;
 	double WattsMin;
@@ -445,23 +445,21 @@ void CKASAReading::SetMinMax(const CKASAReading& a)
 	VoltsMin = VoltsMin < a.VoltsMin ? VoltsMin : a.VoltsMin;
 	VoltsMax = VoltsMax > a.VoltsMax ? VoltsMax : a.VoltsMax;
 }
-CKASAReading Average(const CKASAReading& a, const CKASAReading& b)
+CKASAReading& CKASAReading::operator +=(const CKASAReading &b)
 {
-	CKASAReading rval(a);
-	rval.Time = a.Time < b.Time ? a.Time : b.Time; // Use the minimum time (oldest time)
-	rval.Averages = a.Averages + b.Averages; // existing average + new average
-	rval.Watts = ((a.Watts * a.Averages) + (b.Watts * b.Averages)) / rval.Averages;
-	rval.WattsMin = a.WattsMin < b.WattsMin ? a.WattsMin : b.WattsMin;
-	rval.WattsMax = a.WattsMax > b.WattsMax ? a.WattsMax : b.WattsMax;
-	rval.WattsMin = a.Watts < a.WattsMin ? a.Watts : a.WattsMin;
-	rval.WattsMax = a.Watts > a.WattsMax ? a.Watts : a.WattsMax;
-	rval.Volts = ((a.Volts * a.Averages) + (b.Volts * b.Averages)) / rval.Averages;
-	rval.VoltsMin = a.VoltsMin < b.VoltsMin ? a.VoltsMin : b.VoltsMin;
-	rval.VoltsMax = a.VoltsMax > b.VoltsMax ? a.VoltsMax : b.VoltsMax;
-	rval.VoltsMin = a.Volts < a.VoltsMin ? a.Volts : a.VoltsMin;
-	rval.VoltsMax = a.Volts > a.VoltsMax ? a.Volts : a.VoltsMax;
-	rval = a; // HACK: Averaging still needs work, just use first value passed
-	return(rval);
+	Time = std::max(Time, b.Time); // Use the maximum time (newest time)
+	auto OldAverages = Averages;
+	Averages += b.Averages; // existing average + new average
+	Watts = ((Watts * OldAverages) + (b.Watts * b.Averages)) / Averages;
+	WattsMin = std::min(std::min(Watts, WattsMin), b.WattsMin);
+	WattsMax = std::max(std::max(Watts, WattsMax), b.WattsMax);
+	Volts = ((Volts * OldAverages) + (b.Volts * b.Averages)) / Averages;
+	VoltsMin = std::min(std::min(Volts, VoltsMin), b.VoltsMin);
+	VoltsMax = std::max(std::max(Volts, VoltsMax), b.VoltsMax);
+	Amps = ((Amps * OldAverages) + (b.Amps * b.Averages)) / Averages;
+	AmpsMin = std::min(std::min(Amps, AmpsMin), b.AmpsMin);
+	AmpsMax = std::max(std::max(Amps, AmpsMax), b.AmpsMax);
+	return(*this);
 }
 /////////////////////////////////////////////////////////////////////////////
 std::map<std::string, std::vector<CKASAReading>> KasaMRTGLogs; // memory map of BT addresses and vector structure similar to MRTG Log Files
@@ -489,8 +487,9 @@ void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
 	else
 	{
 		FakeMRTGFile[0] = TheValue;	// current value
-		FakeMRTGFile[1] = Average(FakeMRTGFile[0], FakeMRTGFile[1]); // averaged value up to DAY_SAMPLE size
+		FakeMRTGFile[1] += TheValue;
 	}
+	bool ZeroAccumulator = false;
 	auto DaySampleFirst = FakeMRTGFile.begin() + 2;
 	auto DaySampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT;
 	auto WeekSampleFirst = FakeMRTGFile.begin() + 2 + DAY_COUNT;
@@ -502,6 +501,7 @@ void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
 	// For every time difference between FakeMRTGFile[1] and FakeMRTGFile[2] that's greater than DAY_SAMPLE we shift that data towards the back.
 	while (difftime(FakeMRTGFile[1].Time, DaySampleFirst->Time) > DAY_SAMPLE)
 	{
+		ZeroAccumulator = true;
 		// shuffle all the day samples toward the end
 		std::copy_backward(DaySampleFirst, DaySampleLast - 1, DaySampleLast);
 		*DaySampleFirst = FakeMRTGFile[1];
@@ -557,6 +557,8 @@ void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
 			}
 		}
 	}
+	if (ZeroAccumulator)
+		FakeMRTGFile[1] = CKASAReading();
 }
 // Returns a curated vector of data points specific to the requested graph type from the internal memory structure map keyed off the Bluetooth address.
 void ReadMRTGData(const std::string& TheDeviceID, std::vector<CKASAReading>& TheValues, const GraphType graph = GraphType::daily)
@@ -851,6 +853,7 @@ void WriteAllSVG()
 		IndexFile << "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">" << std::endl;
 		IndexFile << "<HTML>" << std::endl;
 		IndexFile << "<HEAD>" << std::endl;
+		IndexFile << "<meta http-equiv=\"refresh\" content=\"300\" >" << std::endl;
 		IndexFile << "<style type=\"text/css\">" << std::endl;
 		IndexFile << "\tbody { color: black; }" << std::endl;
 		IndexFile << "\th3 { position: absolute; top: 0px; left: 90px; }" << std::endl;
@@ -881,7 +884,7 @@ void WriteAllSVG()
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::daily, SVGMinMax & 0x01);
 #ifdef DEBUG
 		if (IndexFile.is_open())
-			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << "\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << " day\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
 #endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
@@ -892,7 +895,7 @@ void WriteAllSVG()
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::weekly, SVGMinMax & 0x02);
 #ifdef DEBUG
 		if (IndexFile.is_open())
-			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << "\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << " week\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
 #endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
@@ -903,7 +906,7 @@ void WriteAllSVG()
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::monthly, SVGMinMax & 0x04);
 #ifdef DEBUG
 		if (IndexFile.is_open())
-			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << "\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << " month\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
 #endif // DEBUG
 		OutputFilename.str("");
 		OutputFilename << SVGDirectory;
@@ -914,7 +917,7 @@ void WriteAllSVG()
 		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::yearly, SVGMinMax & 0x08);
 #ifdef DEBUG
 		if (IndexFile.is_open())
-			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << "\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << " year\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
 #endif // DEBUG
 	}
 
@@ -922,6 +925,7 @@ void WriteAllSVG()
 	if (IndexFile.is_open())
 	{
 		IndexFile << "</BODY>" << std::endl;
+		IndexFile << "</HTML>" << std::endl;
 		IndexFile.close();
 	}
 #endif // DEBUG
@@ -1417,6 +1421,13 @@ int main(int argc, char **argv)
 							0,								// Flags
 							(const struct sockaddr *)&saBroadCast,		// Server address
 							sizeof(struct sockaddr));		// Length of address
+						if (ConsoleVerbosity > 0)
+						{
+							char BroadcastName[INET6_ADDRSTRLEN] = { 0 };
+							struct sockaddr_in* foo = (struct sockaddr_in*)&saBroadCast;
+							inet_ntop(saBroadCast.sin_family, &(foo->sin_addr), BroadcastName, INET6_ADDRSTRLEN);
+							std::cout << "[" << getTimeISO8601() << "] broadcast (" << BroadcastName << ") : " << KasaSysinfo << std::endl;
+						}
 					}
 				}
 			}
