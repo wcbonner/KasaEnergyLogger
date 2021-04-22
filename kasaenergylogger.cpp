@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210421-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210421-2 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -277,7 +277,6 @@ public:
 	void NormalizeTime(granularity type);
 	granularity GetTimeGranularity(void) const;
 	bool IsValid(void) const { return(Averages > 0); };
-	void SetMinMax(const CKASAReading& a);
 	CKASAReading& operator +=(const CKASAReading &b);
 protected:
 	double Watts;
@@ -431,34 +430,19 @@ CKASAReading::CKASAReading(const std::string TheLine)
 	if (current_ma != 0)
 		Amps = AmpsMin = AmpsMax = current_ma / 1000.0;
 }
-void CKASAReading::SetMinMax(const CKASAReading& a)
-{
-	WattsMin = WattsMin < Watts ? WattsMin : Watts;
-	WattsMax = WattsMax > Watts ? WattsMax : Watts;
-
-	WattsMin = WattsMin < a.WattsMin ? WattsMin : a.WattsMin;
-	WattsMax = WattsMax > a.WattsMax ? WattsMax : a.WattsMax;
-
-	VoltsMin = VoltsMin < Volts ? VoltsMin : Volts;
-	VoltsMax = VoltsMax > Volts ? VoltsMax : Volts;
-
-	VoltsMin = VoltsMin < a.VoltsMin ? VoltsMin : a.VoltsMin;
-	VoltsMax = VoltsMax > a.VoltsMax ? VoltsMax : a.VoltsMax;
-}
 CKASAReading& CKASAReading::operator +=(const CKASAReading &b)
 {
 	Time = std::max(Time, b.Time); // Use the maximum time (newest time)
-	auto OldAverages = Averages;
-	Averages += b.Averages; // existing average + new average
-	Watts = ((Watts * OldAverages) + (b.Watts * b.Averages)) / Averages;
+	Watts = ((Watts * Averages) + (b.Watts * b.Averages)) / (Averages + b.Averages);
 	WattsMin = std::min(std::min(Watts, WattsMin), b.WattsMin);
 	WattsMax = std::max(std::max(Watts, WattsMax), b.WattsMax);
-	Volts = ((Volts * OldAverages) + (b.Volts * b.Averages)) / Averages;
+	Volts = ((Volts * Averages) + (b.Volts * b.Averages)) / (Averages + b.Averages);
 	VoltsMin = std::min(std::min(Volts, VoltsMin), b.VoltsMin);
 	VoltsMax = std::max(std::max(Volts, VoltsMax), b.VoltsMax);
-	Amps = ((Amps * OldAverages) + (b.Amps * b.Averages)) / Averages;
+	Amps = ((Amps * Averages) + (b.Amps * b.Averages)) / (Averages + b.Averages);
 	AmpsMin = std::min(std::min(Amps, AmpsMin), b.AmpsMin);
 	AmpsMax = std::max(std::max(Amps, AmpsMax), b.AmpsMax);
+	Averages += b.Averages; // existing average + new average
 	return(*this);
 }
 /////////////////////////////////////////////////////////////////////////////
@@ -514,14 +498,9 @@ void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
 				std::cout << "[" << getTimeISO8601() << "] shuffling year " << timeToExcelLocal(DaySampleFirst->Time) << " > " << timeToExcelLocal(YearSampleFirst->Time) << std::endl;
 			// shuffle all the year samples toward the end
 			std::copy_backward(YearSampleFirst, YearSampleLast - 1, YearSampleLast);
-			*YearSampleFirst = *DaySampleFirst;
-
-			auto iter = DaySampleFirst;
-			while (iter->IsValid() && ((iter - DaySampleFirst) < (12 * 24))) // One Day of day samples
-			{
-				YearSampleFirst->SetMinMax(*iter);
-				iter++;
-			}
+			*YearSampleFirst = CKASAReading();
+			for (auto iter = DaySampleFirst; (iter->IsValid() && ((iter - DaySampleFirst) < (12 * 24))); iter++) // One Day of day samples
+				*YearSampleFirst += *iter;
 		}
 		if ((DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::year) ||
 			(DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::month))
@@ -530,14 +509,9 @@ void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
 				std::cout << "[" << getTimeISO8601() << "] shuffling month " << timeToExcelLocal(DaySampleFirst->Time) << std::endl;
 			// shuffle all the month samples toward the end
 			std::copy_backward(MonthSampleFirst, MonthSampleLast - 1, MonthSampleLast);
-			*MonthSampleFirst = *DaySampleFirst;
-
-			auto iter = DaySampleFirst;
-			while (iter->IsValid() && ((iter - DaySampleFirst) < (12 * 2))) // two hours of day samples
-			{
-				MonthSampleFirst->SetMinMax(*iter);
-				iter++;
-			}
+			*MonthSampleFirst = CKASAReading();
+			for (auto iter = DaySampleFirst; (iter->IsValid() && ((iter - DaySampleFirst) < (12 * 2))); iter++) // two hours of day samples
+				*MonthSampleFirst += *iter;
 		}
 		if ((DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::year) ||
 			(DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::month) ||
@@ -547,14 +521,9 @@ void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
 				std::cout << "[" << getTimeISO8601() << "] shuffling week " << timeToExcelLocal(DaySampleFirst->Time) << std::endl;
 			// shuffle all the month samples toward the end
 			std::copy_backward(WeekSampleFirst, WeekSampleLast - 1, WeekSampleLast);
-			*WeekSampleFirst = *DaySampleFirst;
-
-			auto iter = DaySampleFirst;
-			while (iter->IsValid() && ((iter - DaySampleFirst) < 6)) // Half an hour of day samples
-			{
-				YearSampleFirst->SetMinMax(*iter);
-				iter++;
-			}
+			*WeekSampleFirst = CKASAReading();
+			for (auto iter = DaySampleFirst; (iter->IsValid() && ((iter - DaySampleFirst) < 6)); iter++) // Half an hour of day samples
+				*WeekSampleFirst += *iter;
 		}
 	}
 	if (ZeroAccumulator)
@@ -584,7 +553,7 @@ void ReadMRTGData(const std::string& TheDeviceID, std::vector<CKASAReading>& The
 				while (iter->IsValid() && (iter != TheValues.end()))
 					iter++;
 				TheValues.resize(iter - TheValues.begin());
-				*(TheValues.begin()) = *(it->second.begin()); //HACK: include the most recent time sample
+				TheValues.begin()->Time = it->second.begin()->Time; //HACK: include the most recent time sample
 			}
 			else if (graph == GraphType::weekly)
 			{
@@ -659,13 +628,23 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				double WattsMax = DBL_MIN;
 				double AmpsMin = DBL_MAX;
 				double AmpsMax = DBL_MIN;
-				for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
-				{
-					WattsMin = std::min(WattsMin, TheValues[index].GetWattsMin());
-					WattsMax = std::max(WattsMax, TheValues[index].GetWattsMax());
-					AmpsMin = std::min(AmpsMin, TheValues[index].GetAmpsMin());
-					AmpsMax = std::max(AmpsMax, TheValues[index].GetAmpsMax());
-				}
+				if (MinMax)
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+					{
+						WattsMin = std::min(WattsMin, TheValues[index].GetWattsMin());
+						WattsMax = std::max(WattsMax, TheValues[index].GetWattsMax());
+						AmpsMin = std::min(AmpsMin, TheValues[index].GetAmpsMin());
+						AmpsMax = std::max(AmpsMax, TheValues[index].GetAmpsMax());
+					}
+				else
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+					{
+						WattsMin = std::min(WattsMin, TheValues[index].GetWatts());
+						WattsMax = std::max(WattsMax, TheValues[index].GetWatts());
+						AmpsMin = std::min(AmpsMin, TheValues[index].GetAmps());
+						AmpsMax = std::max(AmpsMax, TheValues[index].GetAmps());
+					}
+
 				double WattsVerticalDivision = (WattsMax - WattsMin) / 4;
 				double WattsVerticalFactor = (GraphBottom - GraphTop) / (WattsMax - WattsMin);
 				double AmpsVerticalDivision = (AmpsMax - AmpsMin) / 4;
@@ -1665,7 +1644,6 @@ int main(int argc, char **argv)
 			std::cout << "[" << getTimeISO8601() << "]\r";
 			std::cout.flush();
 		}
-
 	}
 
 	GenerateLogFile(KasaClients);
