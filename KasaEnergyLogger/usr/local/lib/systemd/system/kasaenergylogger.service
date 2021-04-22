@@ -9,7 +9,7 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=10
-ExecStart=/usr/local/bin/kasaenergylogger -v 0 -l %L/kasaenergylogger/ --svg /var/www/html/kasa/ --minmax 15
+ExecStart=/usr/local/bin/kasaenergylogger -v 0 -l %L/kasaenergylogger/ --svg /var/www/html/kasa/ --minmax 14
 KillSignal=SIGINT
 
 [Install]
