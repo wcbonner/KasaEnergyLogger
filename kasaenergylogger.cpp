@@ -445,18 +445,21 @@ CKASAReading::CKASAReading(const std::string TheLine)
 }
 CKASAReading& CKASAReading::operator +=(const CKASAReading &b)
 {
-	Time = std::max(Time, b.Time); // Use the maximum time (newest time)
-	Watts = ((Watts * Averages) + (b.Watts * b.Averages)) / (Averages + b.Averages);
-	WattsMin = std::min(std::min(Watts, WattsMin), b.WattsMin);
-	WattsMax = std::max(std::max(Watts, WattsMax), b.WattsMax);
-	Volts = ((Volts * Averages) + (b.Volts * b.Averages)) / (Averages + b.Averages);
-	VoltsMin = std::min(std::min(Volts, VoltsMin), b.VoltsMin);
-	VoltsMax = std::max(std::max(Volts, VoltsMax), b.VoltsMax);
-	Amps = ((Amps * Averages) + (b.Amps * b.Averages)) / (Averages + b.Averages);
-	AmpsMin = std::min(std::min(Amps, AmpsMin), b.AmpsMin);
-	AmpsMax = std::max(std::max(Amps, AmpsMax), b.AmpsMax);
-	TotalWattHours = std::max(TotalWattHours, b.TotalWattHours);
-	Averages += b.Averages; // existing average + new average
+	if (b.IsValid())
+	{
+		Time = std::max(Time, b.Time); // Use the maximum time (newest time)
+		Watts = ((Watts * Averages) + (b.Watts * b.Averages)) / (Averages + b.Averages);	// weighted average
+		WattsMin = std::min(std::min(Watts, WattsMin), b.WattsMin);
+		WattsMax = std::max(std::max(Watts, WattsMax), b.WattsMax);
+		Volts = ((Volts * Averages) + (b.Volts * b.Averages)) / (Averages + b.Averages);	// weighted average
+		VoltsMin = std::min(std::min(Volts, VoltsMin), b.VoltsMin);
+		VoltsMax = std::max(std::max(Volts, VoltsMax), b.VoltsMax);
+		Amps = ((Amps * Averages) + (b.Amps * b.Averages)) / (Averages + b.Averages);	// weighted average
+		AmpsMin = std::min(std::min(Amps, AmpsMin), b.AmpsMin);
+		AmpsMax = std::max(std::max(Amps, AmpsMax), b.AmpsMax);
+		TotalWattHours = std::max(TotalWattHours, b.TotalWattHours);
+		Averages += b.Averages; // existing average + new average
+	}
 	return(*this);
 }
 /////////////////////////////////////////////////////////////////////////////
@@ -658,6 +661,11 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 						AmpsMin = std::min(AmpsMin, TheValues[index].GetAmps());
 						AmpsMax = std::max(AmpsMax, TheValues[index].GetAmps());
 					}
+				// These next two checks are to make sure the virtical factor doesn't skyrocket to rediculous proportions.
+				if ((WattsMax - WattsMin) < 1)
+					WattsMax = WattsMin + 1;
+				if ((AmpsMax - AmpsMin) < 1)
+					AmpsMax = AmpsMin + 1;
 
 				double WattsVerticalDivision = (WattsMax - WattsMin) / 4;
 				double WattsVerticalFactor = (GraphBottom - GraphTop) / (WattsMax - WattsMin);
