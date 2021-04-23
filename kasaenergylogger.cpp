@@ -26,36 +26,36 @@
 // I try to leave credits in comments scattered through the code itself and
 // would appreciate similar credit if you use portions of my code.
 /////////////////////////////////////////////////////////////////////////////
-#include <cstring>
-#include <cstdio>
-#include <ctime>
-#include <csignal>
-#include <cmath>
-#include <climits>
+#include <algorithm>
+#include <arpa/inet.h>	// For inet_addr()
 #include <cfloat>
-#include <string>
+#include <climits>
+#include <cmath>
+#include <csignal>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <dirent.h>
+#include <fcntl.h>
+#include <fstream>
+#include <getopt.h>
+#include <ifaddrs.h>	// for getifaddrs()
+#include <iomanip>
 #include <iostream>
 #include <locale>
-#include <queue>
 #include <map>
-#include <vector>
-#include <algorithm>
-#include <iomanip>
-#include <fstream>
+#include <netdb.h>		// For gethostbyname()
+#include <netinet/in.h>	// For sockaddr_in
+#include <queue>
 #include <sstream>
-#include <sys/types.h>
-#include <sys/socket.h>		// For socket(), connect(), send(), and recv()
-#include <fcntl.h>
-#include <netinet/in.h>		// For sockaddr_in
-#include <arpa/inet.h>		// For inet_addr()
-#include <ifaddrs.h>		// for getifaddrs()
-#include <unistd.h>			// For close()
-#include <netdb.h>			// For gethostbyname()
+#include <string>
 #include <sys/ioctl.h>
-#include <getopt.h>
-#include <dirent.h>
+#include <sys/socket.h>	// For socket(), connect(), send(), and recv()
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>		// For close()
 #include <utime.h>
+#include <vector>
 /////////////////////////////////////////////////////////////////////////////
 // URLs with information:
 // https://www.softscheck.com/en/reverse-engineering-tp-link-hs110/
@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210421-2 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210423-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
