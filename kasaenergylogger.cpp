@@ -261,7 +261,7 @@ const size_t YEAR_SAMPLE = 24 * 60 * 60;/* Sample every 24 hours */
 class  CKASAReading {
 public:
 	time_t Time;
-	CKASAReading() : Time(0), Watts(0), WattsMin(DBL_MAX), WattsMax(DBL_MIN), Volts(0), VoltsMin(DBL_MAX), VoltsMax(DBL_MIN), Amps(0), AmpsMin(DBL_MAX), AmpsMax(DBL_MIN), Averages(0) { };
+	CKASAReading() : Time(0), Watts(0), WattsMin(DBL_MAX), WattsMax(DBL_MIN), Volts(0), VoltsMin(DBL_MAX), VoltsMax(DBL_MIN), Amps(0), AmpsMin(DBL_MAX), AmpsMax(DBL_MIN), TotalWattHours(0), Averages(0) { };
 	CKASAReading(const std::string data);
 	double GetWatts(void) const { return(Watts); };
 	double GetWattsMin(void) const { return(std::min(Watts, WattsMin)); };
@@ -272,6 +272,7 @@ public:
 	double GetAmps(void) const { return(Amps); };
 	double GetAmpsMin(void) const { return(std::min(Amps, AmpsMin)); };
 	double GetAmpsMax(void) const { return(std::max(Amps, AmpsMax)); };
+	double GetTotalWattHours(void) const { return(TotalWattHours); };
 	std::string GetDeviceID(void) const { return(DeviceID); };
 	enum granularity { day, week, month, year };
 	void NormalizeTime(granularity type);
@@ -288,6 +289,7 @@ protected:
 	double Amps;
 	double AmpsMin;
 	double AmpsMax;
+	double TotalWattHours;
 	int Averages;
 	std::string DeviceID;
 };
@@ -329,13 +331,10 @@ CKASAReading::granularity CKASAReading::GetTimeGranularity(void) const
 }
 CKASAReading::CKASAReading(const std::string TheLine)
 {
-	// TheLine	"{\"date\":\"2021-04-07 20:31:54\",\"deviceId\":\"8006C12BF70963C01E916C3F54E742CC1C0B3FAB01\",{\"emeter\":{\"get_realtime\":{\"voltage_mv\":121553,\"current_ma\":104,\"power_mw\":8276,\"total_wh\":87245,\"err_code\":0}}}}"	const std::__cxx11::string
+	// {"date":"2021-04-23 19:02:25","deviceId":"8006C12BF70963C01E916C3F54E742CC1C0B3FAB01",{"emeter":{"get_realtime":{"voltage_mv":121122,"current_ma":106,"power_mw":8464,"total_wh":136,"err_code":0}}}}
+	// {"date":"2021-04-23 19:03:25","deviceId":"8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D",{"emeter":{"get_realtime":{"current":0.013229,"voltage":122.296761,"power":0,"total":0,"err_code":0}}}}
 	Averages = 1;
-	double power = 0;
-	double voltage = 0;
-	long long power_mw = 0;
-	long long voltage_mv = 0;
-	long long current_ma = 0;
+
 	auto pos = TheLine.find("\"date\"");
 	if (pos != std::string::npos)
 	{
@@ -362,7 +361,7 @@ CKASAReading::CKASAReading(const std::string TheLine)
 		DeviceID = Value;
 	}
 
-	pos = TheLine.find("\"power\"");
+	pos = TheLine.find("\"current\"");
 	if (pos != std::string::npos)
 	{
 		// HACK: I need to clean this up..  
@@ -370,7 +369,7 @@ CKASAReading::CKASAReading(const std::string TheLine)
 		Value.erase(Value.find_first_of(",}"));	// truncate value
 		Value.erase(0, Value.find(':'));	// move past key value
 		Value.erase(Value.find(':'), 1);	// move past seperator
-		power += std::stod(Value.c_str());
+		Amps = AmpsMin = AmpsMax = std::stod(Value.c_str());
 	}
 
 	pos = TheLine.find("\"voltage\"");
@@ -381,10 +380,10 @@ CKASAReading::CKASAReading(const std::string TheLine)
 		Value.erase(Value.find_first_of(",}"));	// truncate value
 		Value.erase(0, Value.find(':'));	// move past key value
 		Value.erase(Value.find(':'), 1);	// move past seperator
-		voltage += std::stod(Value.c_str());
+		Volts = VoltsMin = VoltsMax = std::stod(Value.c_str());
 	}
 
-	pos = TheLine.find("\"power_mw\"");
+	pos = TheLine.find("\"power\"");
 	if (pos != std::string::npos)
 	{
 		// HACK: I need to clean this up..  
@@ -392,18 +391,7 @@ CKASAReading::CKASAReading(const std::string TheLine)
 		Value.erase(Value.find_first_of(",}"));	// truncate value
 		Value.erase(0, Value.find(':'));	// move past key value
 		Value.erase(Value.find(':'), 1);	// move past seperator
-		power_mw += std::stol(Value);
-	}
-
-	pos = TheLine.find("\"voltage_mv\"");
-	if (pos != std::string::npos)
-	{
-		// HACK: I need to clean this up..  
-		std::string Value(TheLine.substr(pos));	// value starts at key
-		Value.erase(Value.find_first_of(",}"));	// truncate value
-		Value.erase(0, Value.find(':'));	// move past key value
-		Value.erase(Value.find(':'), 1);	// move past seperator
-		voltage_mv += std::stol(Value);
+		Watts = WattsMin = WattsMax = std::stod(Value.c_str());
 	}
 
 	pos = TheLine.find("\"current_ma\"");
@@ -414,21 +402,46 @@ CKASAReading::CKASAReading(const std::string TheLine)
 		Value.erase(Value.find_first_of(",}"));	// truncate value
 		Value.erase(0, Value.find(':'));	// move past key value
 		Value.erase(Value.find(':'), 1);	// move past seperator
-		current_ma += std::stol(Value);
+		long long current_ma = std::stol(Value);
+		Amps = AmpsMin = AmpsMax = current_ma / 1000.0;
 	}
 
-	if (power_mw != 0)
-		Watts = WattsMin = WattsMax = power_mw / 1000.0;
-	else
-		Watts = WattsMin = WattsMax = power * 1000.0;
-
-	if (voltage_mv != 0)
+	pos = TheLine.find("\"voltage_mv\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		long long voltage_mv = std::stol(Value);
 		Volts = VoltsMin = VoltsMax = voltage_mv / 1000.0;
-	else
-		Volts = VoltsMin = VoltsMax = voltage;
+	}
 
-	if (current_ma != 0)
-		Amps = AmpsMin = AmpsMax = current_ma / 1000.0;
+	pos = TheLine.find("\"power_mw\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		long long power_mw = std::stol(Value);
+		Watts = WattsMin = WattsMax = power_mw / 1000.0;
+	}
+
+	pos = TheLine.find("\"total_wh\"");
+	if (pos == std::string::npos)
+		pos = TheLine.find("\"total\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		TotalWattHours = std::stol(Value);
+	}
 }
 CKASAReading& CKASAReading::operator +=(const CKASAReading &b)
 {
@@ -442,6 +455,7 @@ CKASAReading& CKASAReading::operator +=(const CKASAReading &b)
 	Amps = ((Amps * Averages) + (b.Amps * b.Averages)) / (Averages + b.Averages);
 	AmpsMin = std::min(std::min(Amps, AmpsMin), b.AmpsMin);
 	AmpsMax = std::max(std::max(Amps, AmpsMax), b.AmpsMax);
+	TotalWattHours = std::max(TotalWattHours, b.TotalWattHours);
 	Averages += b.Averages; // existing average + new average
 	return(*this);
 }
