@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210423-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210423-2 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -662,8 +662,8 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 						AmpsMax = std::max(AmpsMax, TheValues[index].GetAmps());
 					}
 				// These next two checks are to make sure the virtical factor doesn't skyrocket to rediculous proportions.
-				if ((WattsMax - WattsMin) < 1)
-					WattsMax = WattsMin + 1;
+				if ((WattsMax - WattsMin) < 0.01)
+					WattsMax = WattsMin + 0.01;
 				if ((AmpsMax - AmpsMin) < 1)
 					AmpsMax = AmpsMin + 1;
 
