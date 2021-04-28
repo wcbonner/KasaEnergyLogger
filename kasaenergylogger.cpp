@@ -1690,5 +1690,5 @@ int main(int argc, char **argv)
 	signal(SIGHUP, previousHandlerSIGHUP);	// Restore original Hangup signal handler
 	signal(SIGINT, previousHandlerSIGINT);	// Restore original Ctrl-C signal handler
 	std::cerr << ProgramVersionString << " (exiting)" << std::endl;
-@	return 0;
+	return 0;
 }
