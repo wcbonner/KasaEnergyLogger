@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210423-3 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210428-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -1173,6 +1173,7 @@ void SignalHandlerSIGHUP(int signal)
 }
 /////////////////////////////////////////////////////////////////////////////
 int LogFileTime = 60;
+int RunTime = INT_MAX;
 int MinutesAverage = 5;
 static void usage(int argc, char **argv)
 {
@@ -1183,18 +1184,20 @@ static void usage(int argc, char **argv)
 	std::cout << "    -l | --log name      Logging Directory [" << LogDirectory << "]" << std::endl;
 	std::cout << "    -t | --time seconds  time between log file writes [" << LogFileTime << "]" << std::endl;
 	std::cout << "    -v | --verbose level stdout verbosity level [" << ConsoleVerbosity << "]" << std::endl;
+	std::cout << "    -r | --runtime seconds time to run before quitting [" << RunTime << "]" << std::endl;
 	std::cout << "    -m | --mrtg 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D Get last value for this deviceId" << std::endl;
 	std::cout << "    -a | --average minutes [" << MinutesAverage << "]" << std::endl;
 	std::cout << "    -s | --svg name      SVG output directory" << std::endl;
 	std::cout << "    -x | --minmax graph  Draw the minimum and maximum temperature and humidity status on SVG graphs. 1:daily, 2:weekly, 4:monthly, 8:yearly" << std::endl;
 	std::cout << std::endl;
 }
-static const char short_options[] = "hl:t:v:m:a:s:x:";
+static const char short_options[] = "hl:t:v:r:m:a:s:x:";
 static const struct option long_options[] = {
 		{ "help",   no_argument,       NULL, 'h' },
 		{ "log",    required_argument, NULL, 'l' },
 		{ "time",   required_argument, NULL, 't' },
 		{ "verbose",required_argument, NULL, 'v' },
+		{ "runtime",required_argument, NULL, 'r' },
 		{ "mrtg",   required_argument, NULL, 'm' },
 		{ "average",required_argument, NULL, 'a' },
 		{ "svg",	required_argument, NULL, 's' },
@@ -1229,6 +1232,11 @@ int main(int argc, char **argv)
 			break;
 		case 'v':
 			try { ConsoleVerbosity = std::stoi(optarg); }
+			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
+			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
+			break;
+		case 'r':
+			try { RunTime = std::stoi(optarg); }
 			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
 			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
 			break;
@@ -1304,6 +1312,8 @@ int main(int argc, char **argv)
 		}
 	}
 	
+	time_t StartTime;
+	time(&StartTime);
 	time_t CurrentTime;
 	time(&CurrentTime);
 	time_t LastQueryTime = 0;
@@ -1666,6 +1676,8 @@ int main(int argc, char **argv)
 			std::cout << "[" << getTimeISO8601() << "]\r";
 			std::cout.flush();
 		}
+		if (difftime(CurrentTime, StartTime) > RunTime)
+			bRun = false;
 	}
 
 	GenerateLogFile(KasaClients);
@@ -1678,5 +1690,5 @@ int main(int argc, char **argv)
 	signal(SIGHUP, previousHandlerSIGHUP);	// Restore original Hangup signal handler
 	signal(SIGINT, previousHandlerSIGINT);	// Restore original Ctrl-C signal handler
 	std::cerr << ProgramVersionString << " (exiting)" << std::endl;
-	return 0;
+@	return 0;
 }
