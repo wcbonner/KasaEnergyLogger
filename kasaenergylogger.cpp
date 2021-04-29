@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210428-3 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210429-1 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -395,6 +395,17 @@ CKASAReading::CKASAReading(const std::string TheLine)
 		Watts = WattsMin = WattsMax = std::stod(Value.c_str());
 	}
 
+	pos = TheLine.find("\"total\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		TotalWattHours = std::stod(Value);
+	}
+
 	pos = TheLine.find("\"current_ma\"");
 	if (pos != std::string::npos)
 	{
@@ -432,8 +443,6 @@ CKASAReading::CKASAReading(const std::string TheLine)
 	}
 
 	pos = TheLine.find("\"total_wh\"");
-	if (pos == std::string::npos)
-		pos = TheLine.find("\"total\"");
 	if (pos != std::string::npos)
 	{
 		// HACK: I need to clean this up..  
@@ -646,6 +655,8 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 					TotalWHMin = std::min(TotalWHMin, TheValues[index].GetTotalWattHours());
 					TotalWHMax = std::max(TotalWHMax, TheValues[index].GetTotalWattHours());
 				}
+				if ((TotalWHMax - TotalWHMin) < 1)
+					TotalWHMax = TotalWHMin + 1;
 				tempOString = std::ostringstream();
 				tempOString << "Total WH (" << TotalWHMin << " - " << TotalWHMax << ")";
 				std::string YLegendTotalWH(tempOString.str());
