@@ -3,6 +3,7 @@
 
 echo "\033[36m HI I'M A POSTINST SCRIPT `date +"%s"` \033[39m"
 mkdir --parents /var/log/kasaenergylogger/
+mkdir --parents /var/www/html/kasa/
 systemctl daemon-reload
 systemctl enable kasaenergylogger.service
 systemctl start kasaenergylogger.service

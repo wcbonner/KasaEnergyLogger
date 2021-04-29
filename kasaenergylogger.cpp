@@ -26,30 +26,36 @@
 // I try to leave credits in comments scattered through the code itself and
 // would appreciate similar credit if you use portions of my code.
 /////////////////////////////////////////////////////////////////////////////
-#include <cstring>
-#include <cstdio>
-#include <ctime>
+#include <algorithm>
+#include <arpa/inet.h>	// For inet_addr()
+#include <cfloat>
+#include <climits>
+#include <cmath>
 #include <csignal>
-#include <string>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <dirent.h>
+#include <fcntl.h>
+#include <fstream>
+#include <getopt.h>
+#include <ifaddrs.h>	// for getifaddrs()
+#include <iomanip>
 #include <iostream>
 #include <locale>
-#include <queue>
 #include <map>
-#include <vector>
-#include <algorithm>
-#include <iomanip>
-#include <fstream>
+#include <netdb.h>		// For gethostbyname()
+#include <netinet/in.h>	// For sockaddr_in
+#include <queue>
 #include <sstream>
-#include <sys/types.h>
-#include <sys/socket.h>		// For socket(), connect(), send(), and recv()
-#include <fcntl.h>
-#include <netinet/in.h>		// For sockaddr_in
-#include <arpa/inet.h>		// For inet_addr()
-#include <ifaddrs.h>		// for getifaddrs()
-#include <unistd.h>			// For close()
-#include <netdb.h>			// For gethostbyname()
+#include <string>
 #include <sys/ioctl.h>
-#include <getopt.h>
+#include <sys/socket.h>	// For socket(), connect(), send(), and recv()
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>		// For close()
+#include <utime.h>
+#include <vector>
 /////////////////////////////////////////////////////////////////////////////
 // URLs with information:
 // https://www.softscheck.com/en/reverse-engineering-tp-link-hs110/
@@ -60,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 1.20210317-1 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210429-2 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -154,6 +160,27 @@ std::string timeToExcelDate(const time_t & TheTime)
 	}
 	return(ExcelDate.str());
 }
+std::string timeToExcelLocal(const time_t& TheTime)
+{
+	std::ostringstream ExcelDate;
+	struct tm UTC;
+	if (0 != localtime_r(&TheTime, &UTC))
+	{
+		ExcelDate.fill('0');
+		ExcelDate << UTC.tm_year + 1900 << "-";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_mon + 1 << "-";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_mday << " ";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_hour << ":";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_min << ":";
+		ExcelDate.width(2);
+		ExcelDate << UTC.tm_sec;
+	}
+	return(ExcelDate.str());
+}
 /////////////////////////////////////////////////////////////////////////////
 void KasaEncrypt(const std::string &input, uint8_t * output)
 {
@@ -216,7 +243,737 @@ bool operator <(const CKasaClient &a, const CKasaClient &b)
 	return(AdeviceId.compare(BdeviceId) < 0);
 }
 /////////////////////////////////////////////////////////////////////////////
+int ConsoleVerbosity = 1;
 std::string LogDirectory("./");
+std::string SVGDirectory;	// If this remains empty, SVG Files are not created. If it's specified, _day, _week, _month, and _year.svg files are created for each address seen.
+int SVGMinMax = 0; // 0x01 = Draw Watts and Volts Minimum and Maximum line on daily, 0x02 = on weekly, 0x04 = on monthly, 0x08 = on yearly
+int SVGWattHour = 0; // 0x01 = Draw Total Watt Hours on daily, 0x02 = on weekly, 0x04 = on monthly, 0x08 = on yearly
+// The following details were taken from https://github.com/oetiker/mrtg
+const size_t DAY_COUNT = 600;			/* 400 samples is 33.33 hours */
+const size_t WEEK_COUNT = 600;			/* 400 samples is 8.33 days */
+const size_t MONTH_COUNT = 600;			/* 400 samples is 33.33 days */
+const size_t YEAR_COUNT = 2 * 366;		/* 1 sample / day, 366 days, 2 years */
+const size_t DAY_SAMPLE = 5 * 60;		/* Sample every 5 minutes */
+const size_t WEEK_SAMPLE = 30 * 60;		/* Sample every 30 minutes */
+const size_t MONTH_SAMPLE = 2 * 60 * 60;/* Sample every 2 hours */
+const size_t YEAR_SAMPLE = 24 * 60 * 60;/* Sample every 24 hours */
+/////////////////////////////////////////////////////////////////////////////
+// Class I'm using for storing power usage data from the Kasa devices
+class  CKASAReading {
+public:
+	time_t Time;
+	CKASAReading() : Time(0), Watts(0), WattsMin(DBL_MAX), WattsMax(DBL_MIN), Volts(0), VoltsMin(DBL_MAX), VoltsMax(DBL_MIN), Amps(0), AmpsMin(DBL_MAX), AmpsMax(DBL_MIN), TotalWattHours(0), Averages(0) { };
+	CKASAReading(const std::string data);
+	double GetWatts(void) const { return(Watts); };
+	double GetWattsMin(void) const { return(std::min(Watts, WattsMin)); };
+	double GetWattsMax(void) const { return(std::max(Watts, WattsMax)); };
+	double GetVolts(void) const { return(Volts); };
+	double GetVoltsMin(void) const { return(std::min(Volts, VoltsMin)); };
+	double GetVoltsMax(void) const { return(std::max(Volts, VoltsMax)); };
+	double GetAmps(void) const { return(Amps); };
+	double GetAmpsMin(void) const { return(std::min(Amps, AmpsMin)); };
+	double GetAmpsMax(void) const { return(std::max(Amps, AmpsMax)); };
+	double GetTotalWattHours(void) const { return(TotalWattHours); };
+	std::string GetDeviceID(void) const { return(DeviceID); };
+	enum granularity { day, week, month, year };
+	void NormalizeTime(granularity type);
+	granularity GetTimeGranularity(void) const;
+	bool IsValid(void) const { return(Averages > 0); };
+	CKASAReading& operator +=(const CKASAReading &b);
+protected:
+	double Watts;
+	double WattsMin;
+	double WattsMax;
+	double Volts;
+	double VoltsMin;
+	double VoltsMax;
+	double Amps;
+	double AmpsMin;
+	double AmpsMax;
+	double TotalWattHours;
+	int Averages;
+	std::string DeviceID;
+};
+void CKASAReading::NormalizeTime(granularity type)
+{
+	if (type == day)
+		Time = (Time / DAY_SAMPLE) * DAY_SAMPLE;
+	else if (type == week)
+		Time = (Time / WEEK_SAMPLE) * WEEK_SAMPLE;
+	else if (type == month)
+		Time = (Time / MONTH_SAMPLE) * MONTH_SAMPLE;
+	else if (type == year)
+	{
+		struct tm UTC;
+		if (0 != localtime_r(&Time, &UTC))
+		{
+			UTC.tm_hour = 0;
+			UTC.tm_min = 0;
+			UTC.tm_sec = 0;
+			Time = mktime(&UTC);
+		}
+	}
+}
+CKASAReading::granularity CKASAReading::GetTimeGranularity(void) const
+{
+	granularity rval = granularity::day;
+	struct tm UTC;
+	if (0 != localtime_r(&Time, &UTC))
+	{
+		//if (((UTC.tm_hour == 0) && (UTC.tm_min == 0)) || ((UTC.tm_hour == 23) && (UTC.tm_min == 0) && (UTC.tm_isdst == 1)))
+		if ((UTC.tm_hour == 0) && (UTC.tm_min == 0))
+			rval = granularity::year;
+		else if ((UTC.tm_hour % 2 == 0) && (UTC.tm_min == 0))
+			rval = granularity::month;
+		else if ((UTC.tm_min == 0) || (UTC.tm_min == 30))
+			rval = granularity::week;
+	}
+	return(rval);
+}
+CKASAReading::CKASAReading(const std::string TheLine)
+{
+	// {"date":"2021-04-23 19:02:25","deviceId":"8006C12BF70963C01E916C3F54E742CC1C0B3FAB01",{"emeter":{"get_realtime":{"voltage_mv":121122,"current_ma":106,"power_mw":8464,"total_wh":136,"err_code":0}}}}
+	// {"date":"2021-04-23 19:03:25","deviceId":"8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D",{"emeter":{"get_realtime":{"current":0.013229,"voltage":122.296761,"power":0,"total":0,"err_code":0}}}}
+	Averages = 1;
+
+	auto pos = TheLine.find("\"date\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		Value.erase(Value.find('"'), 1);
+		Value.erase(Value.find('"'), 1);
+		Time = ISO8601totime(Value);
+	}
+
+	pos = TheLine.find("\"deviceId\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		Value.erase(Value.find('"'), 1);
+		Value.erase(Value.find('"'), 1);
+		DeviceID = Value;
+	}
+
+	pos = TheLine.find("\"current\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		Amps = AmpsMin = AmpsMax = std::stod(Value.c_str());
+	}
+
+	pos = TheLine.find("\"voltage\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		Volts = VoltsMin = VoltsMax = std::stod(Value.c_str());
+	}
+
+	pos = TheLine.find("\"power\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		Watts = WattsMin = WattsMax = std::stod(Value.c_str());
+	}
+
+	pos = TheLine.find("\"total\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		TotalWattHours = std::stod(Value);
+	}
+
+	pos = TheLine.find("\"current_ma\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		long long current_ma = std::stol(Value);
+		Amps = AmpsMin = AmpsMax = current_ma / 1000.0;
+	}
+
+	pos = TheLine.find("\"voltage_mv\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		long long voltage_mv = std::stol(Value);
+		Volts = VoltsMin = VoltsMax = voltage_mv / 1000.0;
+	}
+
+	pos = TheLine.find("\"power_mw\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		long long power_mw = std::stol(Value);
+		Watts = WattsMin = WattsMax = power_mw / 1000.0;
+	}
+
+	pos = TheLine.find("\"total_wh\"");
+	if (pos != std::string::npos)
+	{
+		// HACK: I need to clean this up..  
+		std::string Value(TheLine.substr(pos));	// value starts at key
+		Value.erase(Value.find_first_of(",}"));	// truncate value
+		Value.erase(0, Value.find(':'));	// move past key value
+		Value.erase(Value.find(':'), 1);	// move past seperator
+		TotalWattHours = std::stol(Value);
+	}
+}
+CKASAReading& CKASAReading::operator +=(const CKASAReading &b)
+{
+	if (b.IsValid())
+	{
+		Time = std::max(Time, b.Time); // Use the maximum time (newest time)
+		Watts = ((Watts * Averages) + (b.Watts * b.Averages)) / (Averages + b.Averages);	// weighted average
+		WattsMin = std::min(std::min(Watts, WattsMin), b.WattsMin);
+		WattsMax = std::max(std::max(Watts, WattsMax), b.WattsMax);
+		Volts = ((Volts * Averages) + (b.Volts * b.Averages)) / (Averages + b.Averages);	// weighted average
+		VoltsMin = std::min(std::min(Volts, VoltsMin), b.VoltsMin);
+		VoltsMax = std::max(std::max(Volts, VoltsMax), b.VoltsMax);
+		Amps = ((Amps * Averages) + (b.Amps * b.Averages)) / (Averages + b.Averages);	// weighted average
+		AmpsMin = std::min(std::min(Amps, AmpsMin), b.AmpsMin);
+		AmpsMax = std::max(std::max(Amps, AmpsMax), b.AmpsMax);
+		TotalWattHours = std::max(TotalWattHours, b.TotalWattHours);
+		Averages += b.Averages; // existing average + new average
+	}
+	return(*this);
+}
+/////////////////////////////////////////////////////////////////////////////
+std::map<std::string, std::vector<CKASAReading>> KasaMRTGLogs; // memory map of BT addresses and vector structure similar to MRTG Log Files
+std::map<std::string, std::string> KasaTitles;
+enum class GraphType { daily, weekly, monthly, yearly };
+void UpdateMRTGData(const std::string& TheDeviceID, CKASAReading& TheValue)
+{
+	std::vector<CKASAReading> foo;
+	auto ret = KasaMRTGLogs.insert(std::pair<std::string, std::vector<CKASAReading>>(TheDeviceID, foo));
+	std::vector<CKASAReading>& FakeMRTGFile = ret.first->second;
+	if (FakeMRTGFile.empty())
+	{
+		FakeMRTGFile.resize(2 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT + YEAR_COUNT);
+		FakeMRTGFile[0] = TheValue;	// current value
+		FakeMRTGFile[1] = TheValue;
+		for (auto index = 0; index < DAY_COUNT; index++)
+			FakeMRTGFile[index + 2].Time = FakeMRTGFile[index + 1].Time - DAY_SAMPLE;
+		for (auto index = 0; index < WEEK_COUNT; index++)
+			FakeMRTGFile[index + 2 + DAY_COUNT].Time = FakeMRTGFile[index + 1 + DAY_COUNT].Time - WEEK_SAMPLE;
+		for (auto index = 0; index < MONTH_COUNT; index++)
+			FakeMRTGFile[index + 2 + DAY_COUNT + WEEK_COUNT].Time = FakeMRTGFile[index + 1 + DAY_COUNT + WEEK_COUNT].Time - MONTH_SAMPLE;
+		for (auto index = 0; index < YEAR_COUNT; index++)
+			FakeMRTGFile[index + 2 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT].Time = FakeMRTGFile[index + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT].Time - YEAR_SAMPLE;
+	}
+	else
+	{
+		FakeMRTGFile[0] = TheValue;	// current value
+		FakeMRTGFile[1] += TheValue;
+	}
+	bool ZeroAccumulator = false;
+	auto DaySampleFirst = FakeMRTGFile.begin() + 2;
+	auto DaySampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT;
+	auto WeekSampleFirst = FakeMRTGFile.begin() + 2 + DAY_COUNT;
+	auto WeekSampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT + WEEK_COUNT;
+	auto MonthSampleFirst = FakeMRTGFile.begin() + 2 + DAY_COUNT + WEEK_COUNT;
+	auto MonthSampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT;
+	auto YearSampleFirst = FakeMRTGFile.begin() + 2 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT;
+	auto YearSampleLast = FakeMRTGFile.begin() + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT + YEAR_COUNT;
+	// For every time difference between FakeMRTGFile[1] and FakeMRTGFile[2] that's greater than DAY_SAMPLE we shift that data towards the back.
+	while (difftime(FakeMRTGFile[1].Time, DaySampleFirst->Time) > DAY_SAMPLE)
+	{
+		ZeroAccumulator = true;
+		// shuffle all the day samples toward the end
+		std::copy_backward(DaySampleFirst, DaySampleLast - 1, DaySampleLast);
+		*DaySampleFirst = FakeMRTGFile[1];
+		DaySampleFirst->NormalizeTime(CKASAReading::granularity::day);
+		if (difftime(DaySampleFirst->Time, (DaySampleFirst + 1)->Time) > DAY_SAMPLE)
+			DaySampleFirst->Time = (DaySampleFirst + 1)->Time + DAY_SAMPLE;
+		if (DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::year)
+		{
+			if (ConsoleVerbosity > 1)
+				std::cout << "[" << getTimeISO8601() << "] shuffling year " << timeToExcelLocal(DaySampleFirst->Time) << " > " << timeToExcelLocal(YearSampleFirst->Time) << std::endl;
+			// shuffle all the year samples toward the end
+			std::copy_backward(YearSampleFirst, YearSampleLast - 1, YearSampleLast);
+			*YearSampleFirst = CKASAReading();
+			for (auto iter = DaySampleFirst; (iter->IsValid() && ((iter - DaySampleFirst) < (12 * 24))); iter++) // One Day of day samples
+				*YearSampleFirst += *iter;
+		}
+		if ((DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::year) ||
+			(DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::month))
+		{
+			if (ConsoleVerbosity > 1)
+				std::cout << "[" << getTimeISO8601() << "] shuffling month " << timeToExcelLocal(DaySampleFirst->Time) << std::endl;
+			// shuffle all the month samples toward the end
+			std::copy_backward(MonthSampleFirst, MonthSampleLast - 1, MonthSampleLast);
+			*MonthSampleFirst = CKASAReading();
+			for (auto iter = DaySampleFirst; (iter->IsValid() && ((iter - DaySampleFirst) < (12 * 2))); iter++) // two hours of day samples
+				*MonthSampleFirst += *iter;
+		}
+		if ((DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::year) ||
+			(DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::month) ||
+			(DaySampleFirst->GetTimeGranularity() == CKASAReading::granularity::week))
+		{
+			if (ConsoleVerbosity > 1)
+				std::cout << "[" << getTimeISO8601() << "] shuffling week " << timeToExcelLocal(DaySampleFirst->Time) << std::endl;
+			// shuffle all the month samples toward the end
+			std::copy_backward(WeekSampleFirst, WeekSampleLast - 1, WeekSampleLast);
+			*WeekSampleFirst = CKASAReading();
+			for (auto iter = DaySampleFirst; (iter->IsValid() && ((iter - DaySampleFirst) < 6)); iter++) // Half an hour of day samples
+				*WeekSampleFirst += *iter;
+		}
+	}
+	if (ZeroAccumulator)
+		FakeMRTGFile[1] = CKASAReading();
+}
+// Returns a curated vector of data points specific to the requested graph type from the internal memory structure map keyed off the Bluetooth address.
+void ReadMRTGData(const std::string& TheDeviceID, std::vector<CKASAReading>& TheValues, const GraphType graph = GraphType::daily)
+{
+	auto it = KasaMRTGLogs.find(TheDeviceID);
+	if (it != KasaMRTGLogs.end())
+	{
+		if (it->second.size() > 0)
+		{
+			auto DaySampleFirst = it->second.begin() + 2;
+			auto DaySampleLast = it->second.begin() + 1 + DAY_COUNT;
+			auto WeekSampleFirst = it->second.begin() + 2 + DAY_COUNT;
+			auto WeekSampleLast = it->second.begin() + 1 + DAY_COUNT + WEEK_COUNT;
+			auto MonthSampleFirst = it->second.begin() + 2 + DAY_COUNT + WEEK_COUNT;
+			auto MonthSampleLast = it->second.begin() + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT;
+			auto YearSampleFirst = it->second.begin() + 2 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT;
+			auto YearSampleLast = it->second.begin() + 1 + DAY_COUNT + WEEK_COUNT + MONTH_COUNT + YEAR_COUNT;
+			if (graph == GraphType::daily)
+			{
+				TheValues.resize(DAY_COUNT);
+				std::copy(DaySampleFirst, DaySampleLast, TheValues.begin());
+				auto iter = TheValues.begin();
+				while (iter->IsValid() && (iter != TheValues.end()))
+					iter++;
+				TheValues.resize(iter - TheValues.begin());
+				TheValues.begin()->Time = it->second.begin()->Time; //HACK: include the most recent time sample
+			}
+			else if (graph == GraphType::weekly)
+			{
+				TheValues.resize(WEEK_COUNT);
+				std::copy(WeekSampleFirst, WeekSampleLast, TheValues.begin());
+				auto iter = TheValues.begin();
+				while (iter->IsValid() && (iter != TheValues.end()))
+					iter++;
+				TheValues.resize(iter - TheValues.begin());
+			}
+			else if (graph == GraphType::monthly)
+			{
+				TheValues.resize(MONTH_COUNT);
+				std::copy(MonthSampleFirst, MonthSampleLast, TheValues.begin());
+				auto iter = TheValues.begin();
+				while (iter->IsValid() && (iter != TheValues.end()))
+					iter++;
+				TheValues.resize(iter - TheValues.begin());
+			}
+			else if (graph == GraphType::yearly)
+			{
+				TheValues.resize(YEAR_COUNT);
+				std::copy(YearSampleFirst, YearSampleLast, TheValues.begin());
+				auto iter = TheValues.begin();
+				while (iter->IsValid() && (iter != TheValues.end()))
+					iter++;
+				TheValues.resize(iter - TheValues.begin());
+			}
+		}
+	}
+}
+// Interesting ideas about SVG and possible tools to look at: https://blog.usejournal.com/of-svg-minification-and-gzip-21cd26a5d007
+// Tools Mentioned: svgo gzthermal https://github.com/subzey/svg-gz-supplement/
+// Takes a curated vector of data points for a specific graph type and writes a SVG file to disk.
+void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileName, const std::string& Title = "", const GraphType graph = GraphType::daily, const bool MinMax = false, const bool DrawTotalWH = false)
+{
+	// By declaring these items here, I'm then basing all my other dimensions on these
+	const int SVGWidth = 500;
+	const int SVGHeight = 135;
+	const int FontSize = 12;
+	const int TickSize = 2;
+	int GraphWidth = SVGWidth - (FontSize * 8);
+	if (DrawTotalWH)
+		GraphWidth -= FontSize;
+	if (!TheValues.empty())
+	{
+		struct stat64 SVGStat;
+		SVGStat.st_mtim.tv_sec = 0;
+		if (-1 == stat64(SVGFileName.c_str(), &SVGStat))
+			if (ConsoleVerbosity > 0)
+				perror(SVGFileName.c_str());
+		//std::cout << "[" << getTimeISO8601() << "] stat returned error on : " << SVGFileName << std::endl;
+		if (TheValues.begin()->Time > SVGStat.st_mtim.tv_sec)	// only write the file if we have new data
+		{
+			std::ofstream SVGFile(SVGFileName);
+			if (SVGFile.is_open())
+			{
+				if (ConsoleVerbosity > 0)
+					std::cout << "[" << getTimeISO8601() << "] Writing: " << SVGFileName << " With Title: " << Title << std::endl;
+				else
+					std::cerr << "Writing: " << SVGFileName << " With Title: " << Title << std::endl;
+				std::ostringstream tempOString;
+				tempOString << "Watts (" << std::setprecision(2) << TheValues[0].GetWatts() << ")";
+				std::string YLegendWatts(tempOString.str());
+				tempOString = std::ostringstream();
+				tempOString << "Amps (" << std::setprecision(2) << TheValues[0].GetAmps() << ")";
+				std::string YLegendAmps(tempOString.str());
+				double TotalWHMin = DBL_MAX;
+				double TotalWHMax = DBL_MIN;
+				for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+				{
+					TotalWHMin = std::min(TotalWHMin, TheValues[index].GetTotalWattHours());
+					TotalWHMax = std::max(TotalWHMax, TheValues[index].GetTotalWattHours());
+				}
+				if ((TotalWHMax - TotalWHMin) < 1)
+					TotalWHMax = TotalWHMin + 1;
+				tempOString = std::ostringstream();
+				tempOString << "Total WH (" << TotalWHMin << " - " << TotalWHMax << ")";
+				std::string YLegendTotalWH(tempOString.str());
+				int GraphTop = FontSize + TickSize;
+				int GraphBottom = SVGHeight - GraphTop;
+				int GraphRight = SVGWidth - (GraphTop * 2) - 2;
+				int GraphLeft = GraphRight - GraphWidth;
+				int GraphVerticalDivision = (GraphBottom - GraphTop) / 4;
+				double WattsMin = 0;
+				double WattsMax = DBL_MIN;
+				double AmpsMin = 0;
+				double AmpsMax = DBL_MIN;
+				if (MinMax)
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+					{
+						WattsMax = std::max(WattsMax, TheValues[index].GetWattsMax());
+						AmpsMax = std::max(AmpsMax, TheValues[index].GetAmpsMax());
+					}
+				else
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+					{
+						WattsMax = std::max(WattsMax, TheValues[index].GetWatts());
+						AmpsMax = std::max(AmpsMax, TheValues[index].GetAmps());
+					}
+				// These next two checks are to make sure the virtical factor doesn't skyrocket to rediculous proportions.
+				if ((WattsMax - WattsMin) < 1)
+					WattsMax = WattsMin + 1;
+				if ((AmpsMax - AmpsMin) < 0.001)
+					AmpsMax = AmpsMin + 0.001;
+
+				double WattsVerticalDivision = (WattsMax - WattsMin) / 4;
+				double WattsVerticalFactor = (GraphBottom - GraphTop) / (WattsMax - WattsMin);
+				double AmpsVerticalDivision = (AmpsMax - AmpsMin) / 4;
+				double AmpsVerticalFactor = (GraphBottom - GraphTop) / (AmpsMax - AmpsMin);
+
+				SVGFile << "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?>" << std::endl;
+				SVGFile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"" << SVGWidth << "\" height=\"" << SVGHeight << "\">" << std::endl;
+				SVGFile << "\t<!-- Created by: " << ProgramVersionString << " -->" << std::endl;
+				SVGFile << "\t<style>" << std::endl;
+				SVGFile << "\t\ttext { font-family: sans-serif; font-size: " << FontSize << "px; fill: black; }" << std::endl;
+				SVGFile << "\t\tline { stroke: black; }" << std::endl;
+				SVGFile << "\t\tpolygon { fill-opacity: 0.5; }" << std::endl;
+				SVGFile << "\t@media only screen and (prefers-color-scheme: dark) {" << std::endl;
+				SVGFile << "\t\ttext { fill: grey; }" << std::endl;
+				SVGFile << "\t\tline { stroke: grey; }" << std::endl;
+				SVGFile << "\t}" << std::endl;
+				SVGFile << "\t</style>" << std::endl;
+				SVGFile << "\t<rect style=\"fill-opacity:0;stroke:grey;stroke-width:2\" width=\"" << SVGWidth << "\" height=\"" << SVGHeight << "\" />" << std::endl;
+
+				// Legend Text
+				SVGFile << "\t<text x=\"" << GraphLeft << "\" y=\"" << GraphTop - 2 << "\">" << Title << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"text-anchor:end\" x=\"" << GraphRight << "\" y=\"" << GraphTop - 2 << "\">" << timeToExcelLocal(TheValues[0].Time) << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:middle\" x=\"" << FontSize << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendAmps << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green;text-anchor:middle\" x=\"" << FontSize * 2 << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize * 2 << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendWatts << "</text>" << std::endl;
+				if (DrawTotalWH)
+					SVGFile << "\t<text style=\"fill:OrangeRed\" text-anchor=\"middle\" x=\"" << FontSize * 3 << "\" y=\"" << (GraphTop + GraphBottom) / 2 << "\" transform=\"rotate(270 " << FontSize * 3 << "," << (GraphTop + GraphBottom) / 2 << ")\">" << YLegendTotalWH << "</text>" << std::endl;
+
+				if (MinMax)
+				{
+					SVGFile << "\t<!-- Watts Max -->" << std::endl;
+					SVGFile << "\t<polygon style=\"fill:lime;stroke:green\" points=\"";
+					SVGFile << GraphLeft + 1 << "," << GraphBottom - 1 << " ";
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((WattsMax - TheValues[index].GetWattsMax()) * WattsVerticalFactor) + GraphTop) << " ";
+					if (GraphWidth < TheValues.size())
+						SVGFile << GraphRight - 1 << "," << GraphBottom - 1;
+					else
+						SVGFile << GraphRight - (GraphWidth - TheValues.size()) << "," << GraphBottom - 1;
+					SVGFile << "\" />" << std::endl;
+					SVGFile << "\t<!-- Watts Min -->" << std::endl;
+					SVGFile << "\t<polygon style=\"fill:lime;stroke:green\" points=\"";
+					SVGFile << GraphLeft + 1 << "," << GraphBottom - 1 << " ";
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((WattsMax - TheValues[index].GetWattsMin()) * WattsVerticalFactor) + GraphTop) << " ";
+					if (GraphWidth < TheValues.size())
+						SVGFile << GraphRight - 1 << "," << GraphBottom - 1;
+					else
+						SVGFile << GraphRight - (GraphWidth - TheValues.size()) << "," << GraphBottom - 1;
+					SVGFile << "\" />" << std::endl;
+				}
+				else
+				{
+					// Watts Graphic as a Filled polygon
+					SVGFile << "\t<!-- Watts -->" << std::endl;
+					SVGFile << "\t<polygon style=\"fill:lime;stroke:green\" points=\"";
+					SVGFile << GraphLeft + 1 << "," << GraphBottom - 1 << " ";
+					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((WattsMax - TheValues[index].GetWatts()) * WattsVerticalFactor) + GraphTop) << " ";
+					if (GraphWidth < TheValues.size())
+						SVGFile << GraphRight - 1 << "," << GraphBottom - 1;
+					else
+						SVGFile << GraphRight - (GraphWidth - TheValues.size()) << "," << GraphBottom - 1;
+					SVGFile << "\" />" << std::endl;
+				}
+
+				// Top Line
+				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop << "\"/>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 5 << "\">" << std::setprecision(2) << AmpsMax << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 << "\">" << std::setprecision(2) << WattsMax << "</text>" << std::endl;
+
+				// Bottom Line
+				SVGFile << "\t<line x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphBottom << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
+				SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphBottom + 5 << "\">" << std::setprecision(2) << AmpsMin << "</text>" << std::endl;
+				SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphBottom + 4 << "\">" << std::setprecision(2) << WattsMin << "</text>" << std::endl;
+
+				// Left Line
+				SVGFile << "\t<line x1=\"" << GraphLeft << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
+
+				// Right Line
+				SVGFile << "\t<line x1=\"" << GraphRight << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphRight << "\" y2=\"" << GraphBottom << "\"/>" << std::endl;
+
+				// Vertical Division Dashed Lines
+				for (auto index = 1; index < 4; index++)
+				{
+					SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft - TickSize << "\" y1=\"" << GraphTop + (GraphVerticalDivision * index) << "\" x2=\"" << GraphRight + TickSize << "\" y2=\"" << GraphTop + (GraphVerticalDivision * index) << "\" />" << std::endl;
+					SVGFile << "\t<text style=\"fill:blue;text-anchor:end\" x=\"" << GraphLeft - TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::setprecision(2) << AmpsMax - (AmpsVerticalDivision * index) << "</text>" << std::endl;
+					SVGFile << "\t<text style=\"fill:green\" x=\"" << GraphRight + TickSize << "\" y=\"" << GraphTop + 4 + (GraphVerticalDivision * index) << "\">" << std::setprecision(2) << WattsMax - (WattsVerticalDivision * index) << "</text>" << std::endl;
+				}
+
+				// Horizontal Division Dashed Lines
+				for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+				{
+					struct tm UTC;
+					if (0 != localtime_r(&TheValues[index].Time, &UTC))
+					{
+						if (graph == GraphType::daily)
+						{
+							if (UTC.tm_min == 0)
+							{
+								if (UTC.tm_hour == 0)
+									SVGFile << "\t<line style=\"stroke:red\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+								else
+									SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+								if (UTC.tm_hour % 2 == 0)
+									SVGFile << "\t<text style=\"text-anchor:middle\" x=\"" << GraphLeft + index << "\" y=\"" << SVGHeight - 2 << "\">" << UTC.tm_hour << "</text>" << std::endl;
+							}
+						}
+						else if (graph == GraphType::weekly)
+						{
+							const std::string Weekday[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+							if ((UTC.tm_hour == 0) && (UTC.tm_min == 0))
+							{
+								if (UTC.tm_wday == 1)
+									SVGFile << "\t<line style=\"stroke:red\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+								else
+									SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							}
+							else if ((UTC.tm_hour == 12) && (UTC.tm_min == 0))
+								SVGFile << "\t<text style=\"text-anchor:middle\" x=\"" << GraphLeft + index << "\" y=\"" << SVGHeight - 2 << "\">" << Weekday[UTC.tm_wday] << "</text>" << std::endl;
+						}
+						else if (graph == GraphType::monthly)
+						{
+							if ((UTC.tm_mday == 1) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<line style=\"stroke:red\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							if ((UTC.tm_wday == 0) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							else if ((UTC.tm_wday == 3) && (UTC.tm_hour == 12) && (UTC.tm_min == 0))
+								SVGFile << "\t<text style=\"text-anchor:middle\" x=\"" << GraphLeft + index << "\" y=\"" << SVGHeight - 2 << "\">Week " << UTC.tm_yday / 7 + 1 << "</text>" << std::endl;
+						}
+						else if (graph == GraphType::yearly)
+						{
+							const std::string Month[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+							if ((UTC.tm_yday == 0) && (UTC.tm_mday == 1) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<line style=\"stroke:red\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							else if ((UTC.tm_mday == 1) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<line style=\"stroke-dasharray:1\" x1=\"" << GraphLeft + index << "\" y1=\"" << GraphTop << "\" x2=\"" << GraphLeft + index << "\" y2=\"" << GraphBottom + TickSize << "\" />" << std::endl;
+							else if ((UTC.tm_mday == 15) && (UTC.tm_hour == 0) && (UTC.tm_min == 0))
+								SVGFile << "\t<text style=\"text-anchor:middle\" x=\"" << GraphLeft + index << "\" y=\"" << SVGHeight - 2 << "\">" << Month[UTC.tm_mon] << "</text>" << std::endl;
+						}
+					}
+				}
+
+				// Directional Arrow
+				SVGFile << "\t<polygon style=\"fill:red;stroke:red;fill-opacity:1;\" points=\"" << GraphLeft - 3 << "," << GraphBottom << " " << GraphLeft + 3 << "," << GraphBottom - 3 << " " << GraphLeft + 3 << "," << GraphBottom + 3 << "\" />" << std::endl;
+
+				if (MinMax)
+				{
+					// Amps Values as a filled polygon showing the minimum and maximum
+					SVGFile << "\t<!-- Amps MinMax -->" << std::endl;
+					SVGFile << "\t<polygon style=\"fill:blue;stroke:blue\" points=\"";
+					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((AmpsMax - TheValues[index].GetAmpsMax()) * AmpsVerticalFactor) + GraphTop) << " ";
+					for (auto index = (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()) - 1; index > 0; index--)
+						SVGFile << index + GraphLeft << "," << int(((AmpsMax - TheValues[index].GetAmpsMin()) * AmpsVerticalFactor) + GraphTop) << " ";
+					SVGFile << "\" />" << std::endl;
+				}
+				else
+				{
+					// Amps Values as a continuous line
+					SVGFile << "\t<!-- Amps -->" << std::endl;
+					SVGFile << "\t<polyline style=\"fill:none;stroke:blue\" points=\"";
+					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((AmpsMax - TheValues[index].GetAmps()) * AmpsVerticalFactor) + GraphTop) << " ";
+					SVGFile << "\" />" << std::endl;
+				}
+
+				// Total Watt-Hour Values as a continuous line
+				if (DrawTotalWH)
+				{
+					SVGFile << "\t<!-- TotalWH -->" << std::endl;
+					double TotalWHVerticalFactor = (GraphBottom - GraphTop) / (TotalWHMax - TotalWHMin);
+					SVGFile << "\t<polyline style=\"fill:none;stroke:OrangeRed\" points=\"";
+					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+						SVGFile << index + GraphLeft << "," << int(((TotalWHMax - TheValues[index].GetTotalWattHours()) * TotalWHVerticalFactor) + GraphTop) << " ";
+					SVGFile << "\" />" << std::endl;
+				}
+
+				SVGFile << "</svg>" << std::endl;
+				SVGFile.close();
+				struct utimbuf SVGut;
+				SVGut.actime = TheValues.begin()->Time;
+				SVGut.modtime = TheValues.begin()->Time;
+				utime(SVGFileName.c_str(), &SVGut);
+			}
+		}
+	}
+}
+void WriteAllSVG()
+{
+#ifdef DEBUG
+	std::ofstream IndexFile;
+	std::ostringstream IndexFilename;
+	IndexFilename << SVGDirectory;
+	IndexFilename << "index.html";
+	IndexFile.open(IndexFilename.str());
+	if (IndexFile.is_open())
+	{
+		IndexFile << "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">" << std::endl;
+		IndexFile << "<HTML>" << std::endl;
+		IndexFile << "<HEAD>" << std::endl;
+		IndexFile << "<meta http-equiv=\"refresh\" content=\"300\" >" << std::endl;
+		IndexFile << "<style type=\"text/css\">" << std::endl;
+		IndexFile << "\tbody { color: black; }" << std::endl;
+		IndexFile << "\th3 { position: absolute; top: 0px; left: 90px; }" << std::endl;
+		IndexFile << "\t.image { float: left; position: relative; zoom: 85%; }" << std::endl;
+		IndexFile << "\t@media only screen and (max-width: 980px) { .image { float: left; position: relative; zoom: 190%; } }" << std::endl;
+		IndexFile << "\t@media screen and (prefers-color-scheme: dark) { body { background-color: black; color: white; } }" << std::endl;
+		IndexFile << "</style>" << std::endl;
+		IndexFile << "</HEAD>" << std::endl;
+		IndexFile << "<BODY>" << std::endl;
+	}
+#endif // DEBUG
+
+	//ReadTitleMap();
+	for (auto it = KasaMRTGLogs.begin(); it != KasaMRTGLogs.end(); it++)
+	{
+		std::string DeviceID(it->first);
+		std::string ssTitle(DeviceID);
+		if (KasaTitles.find(DeviceID) != KasaTitles.end())
+			ssTitle = KasaTitles.find(DeviceID)->second;
+		std::ostringstream OutputFilename;
+		OutputFilename.str("");
+		OutputFilename << SVGDirectory;
+		OutputFilename << "kasa-";
+		OutputFilename << DeviceID;
+		OutputFilename << "-day.svg";
+		std::vector<CKASAReading> TheValues;
+		ReadMRTGData(DeviceID, TheValues, GraphType::daily);
+		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::daily, SVGMinMax & 0x01, SVGWattHour & 0x01);
+#ifdef DEBUG
+		if (IndexFile.is_open())
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << " day\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+#endif // DEBUG
+		OutputFilename.str("");
+		OutputFilename << SVGDirectory;
+		OutputFilename << "kasa-";
+		OutputFilename << DeviceID;
+		OutputFilename << "-week.svg";
+		ReadMRTGData(DeviceID, TheValues, GraphType::weekly);
+		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::weekly, SVGMinMax & 0x02, SVGWattHour & 0x02);
+#ifdef DEBUG
+		if (IndexFile.is_open())
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << " week\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+#endif // DEBUG
+		OutputFilename.str("");
+		OutputFilename << SVGDirectory;
+		OutputFilename << "kasa-";
+		OutputFilename << DeviceID;
+		OutputFilename << "-month.svg";
+		ReadMRTGData(DeviceID, TheValues, GraphType::monthly);
+		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::monthly, SVGMinMax & 0x04, SVGWattHour & 0x04);
+#ifdef DEBUG
+		if (IndexFile.is_open())
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << " month\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+#endif // DEBUG
+		OutputFilename.str("");
+		OutputFilename << SVGDirectory;
+		OutputFilename << "kasa-";
+		OutputFilename << DeviceID;
+		OutputFilename << "-year.svg";
+		ReadMRTGData(DeviceID, TheValues, GraphType::yearly);
+		WriteSVG(TheValues, OutputFilename.str(), ssTitle, GraphType::yearly, SVGMinMax & 0x08, SVGWattHour & 0x08);
+#ifdef DEBUG
+		if (IndexFile.is_open())
+			IndexFile << "\t<DIV class=\"image\"><img alt=\"" << ssTitle << " year\" src=\"" << OutputFilename.str().substr(SVGDirectory.length()) << "\" width=\"500\" height=\"135\"></DIV>" << std::endl;
+#endif // DEBUG
+	}
+
+#ifdef DEBUG
+	if (IndexFile.is_open())
+	{
+		IndexFile << "</BODY>" << std::endl;
+		IndexFile << "</HTML>" << std::endl;
+		IndexFile.close();
+	}
+#endif // DEBUG
+}
+/////////////////////////////////////////////////////////////////////////////
+bool ValidateDirectory(std::string& DirectoryName)
+{
+	//TODO: I want to make sure the dorectory name ends with a "/"
+	if (DirectoryName.back() != '/')
+		DirectoryName += '/';
+	//TODO: I want to make sure the dorectory exists
+	//TODO: I want to make sure the dorectory is writable by the current user
+	return(true);
+}
 std::string GenerateLogFileName(const std::string &DeviceID)
 {
 	std::ostringstream OutputFilename;
@@ -253,6 +1010,60 @@ bool GenerateLogFile(std::map<CKasaClient, std::queue<std::string>> &KasaMap)
 		}
 	}
 	return(rval);
+}
+void ReadLoggedData(const std::string& filename)
+{
+	if (ConsoleVerbosity > 0)
+		std::cout << "[" << getTimeISO8601() << "] Reading: " << filename << std::endl;
+	else
+		std::cerr << "Reading: " << filename << std::endl;
+	std::ifstream TheFile(filename);
+	if (TheFile.is_open())
+	{
+		std::string TheLine;
+		while (std::getline(TheFile, TheLine))
+		{
+			CKASAReading theReading(TheLine);
+			if (theReading.IsValid())
+				UpdateMRTGData(theReading.GetDeviceID(), theReading);
+		}
+		TheFile.close();
+	}
+}
+// Finds log files specific to this program then reads the contents into the memory mapped structure simulating MRTG log files.
+void ReadLoggedData(void)
+{
+	DIR* dp;
+	if ((dp = opendir(LogDirectory.c_str())) != NULL)
+	{
+		std::deque<std::string> files;
+		struct dirent* dirp;
+		while ((dirp = readdir(dp)) != NULL)
+			if (DT_REG == dirp->d_type)
+			{
+				std::string filename = LogDirectory + std::string(dirp->d_name);
+				if ((filename.substr(LogDirectory.size(), 4) == "kasa") && (filename.substr(filename.size() - 4, 4) == ".txt"))
+				{
+					auto fullname = realpath(filename.c_str(), NULL);
+					if (fullname != NULL)
+					{
+						filename = fullname;
+						free(fullname);
+					}
+					files.push_back(filename);
+				}
+			}
+		closedir(dp);
+		if (!files.empty())
+		{
+			sort(files.begin(), files.end());
+			while (!files.empty())
+			{
+				ReadLoggedData(*files.begin());
+				files.pop_front();
+			}
+		}
+	}
 }
 /////////////////////////////////////////////////////////////////////////////
 void GetMRTGOutput(const std::string &DeviceID, const int Minutes)
@@ -394,8 +1205,8 @@ void SignalHandlerSIGHUP(int signal)
 	std::cerr << "***************** SIGHUP: Caught HangUp, finishing loop and quitting. *****************" << std::endl;
 }
 /////////////////////////////////////////////////////////////////////////////
-int ConsoleVerbosity = 1;
 int LogFileTime = 60;
+int RunTime = INT_MAX;
 int MinutesAverage = 5;
 static void usage(int argc, char **argv)
 {
@@ -406,18 +1217,26 @@ static void usage(int argc, char **argv)
 	std::cout << "    -l | --log name      Logging Directory [" << LogDirectory << "]" << std::endl;
 	std::cout << "    -t | --time seconds  time between log file writes [" << LogFileTime << "]" << std::endl;
 	std::cout << "    -v | --verbose level stdout verbosity level [" << ConsoleVerbosity << "]" << std::endl;
+	std::cout << "    -r | --runtime seconds time to run before quitting [" << RunTime << "]" << std::endl;
 	std::cout << "    -m | --mrtg 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D Get last value for this deviceId" << std::endl;
 	std::cout << "    -a | --average minutes [" << MinutesAverage << "]" << std::endl;
+	std::cout << "    -s | --svg name      SVG output directory" << std::endl;
+	std::cout << "    -x | --minmax graph  Draw the minimum and maximum temperature and humidity status on SVG graphs. 1:daily, 2:weekly, 4:monthly, 8:yearly" << std::endl;
+	std::cout << "    -w | --watthour graph Display the total watt hours on SVG graphs. 1:daily, 2:weekly, 4:monthly, 8:yearly" << std::endl;
 	std::cout << std::endl;
 }
-static const char short_options[] = "hl:t:v:m:";
+static const char short_options[] = "hl:t:v:r:m:a:s:x:w:";
 static const struct option long_options[] = {
 		{ "help",   no_argument,       NULL, 'h' },
 		{ "log",    required_argument, NULL, 'l' },
 		{ "time",   required_argument, NULL, 't' },
 		{ "verbose",required_argument, NULL, 'v' },
+		{ "runtime",required_argument, NULL, 'r' },
 		{ "mrtg",   required_argument, NULL, 'm' },
 		{ "average",required_argument, NULL, 'a' },
+		{ "svg",	required_argument, NULL, 's' },
+		{ "minmax",	required_argument, NULL, 'x' },
+		{ "watthour",	required_argument, NULL, 'w' },
 		{ 0, 0, 0, 0 }
 };
 /////////////////////////////////////////////////////////////////////////////
@@ -451,11 +1270,31 @@ int main(int argc, char **argv)
 			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
 			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
 			break;
+		case 'r':
+			try { RunTime = std::stoi(optarg); }
+			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
+			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
+			break;
 		case 'm':
 			MRTGAddress = std::string(optarg);
 			break;
 		case 'a':
 			try { MinutesAverage = std::stoi(optarg); }
+			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
+			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
+			break;
+		case 's':
+			SVGDirectory = std::string(optarg);
+			if (!ValidateDirectory(SVGDirectory))
+				SVGDirectory.clear();
+			break;
+		case 'x':
+			try { SVGMinMax = std::stoi(optarg); }
+			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
+			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
+			break;
+		case 'w':
+			try { SVGWattHour = std::stoi(optarg); }
 			catch (const std::invalid_argument& ia) { std::cerr << "Invalid argument: " << ia.what() << std::endl; exit(EXIT_FAILURE); }
 			catch (const std::out_of_range& oor) { std::cerr << "Out of Range error: " << oor.what() << std::endl; exit(EXIT_FAILURE); }
 			break;
@@ -513,14 +1352,19 @@ int main(int argc, char **argv)
 		}
 	}
 	
+	time_t StartTime;
+	time(&StartTime);
 	time_t CurrentTime;
 	time(&CurrentTime);
 	time_t LastQueryTime = 0;
 	time_t LastBroadcastTime = 0;
 	time_t LastLogTime = 0;
 	time_t DisplayTime = 0;
+	time_t TimeSVG = 0;
 	std::vector<struct sockaddr> BroadcastAddresses;
 	std::map<CKasaClient, std::queue<std::string>> KasaClients;
+
+	ReadLoggedData();
 
 	// Loop until we get a Ctrl-C
 	while (bRun)
@@ -628,6 +1472,13 @@ int main(int argc, char **argv)
 							0,								// Flags
 							(const struct sockaddr *)&saBroadCast,		// Server address
 							sizeof(struct sockaddr));		// Length of address
+						if (ConsoleVerbosity > 0)
+						{
+							char BroadcastName[INET6_ADDRSTRLEN] = { 0 };
+							struct sockaddr_in* foo = (struct sockaddr_in*)&saBroadCast;
+							inet_ntop(saBroadCast.sin_family, &(foo->sin_addr), BroadcastName, INET6_ADDRSTRLEN);
+							std::cout << "[" << getTimeISO8601() << "] broadcast (" << BroadcastName << ") : " << KasaSysinfo << std::endl;
+						}
 					}
 				}
 			}
@@ -668,6 +1519,22 @@ int main(int argc, char **argv)
 					if (ConsoleVerbosity > 0)
 						if (ret.first->second.empty())
 							std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << std::endl;
+
+					// This adds reported alias information to the TitleMap
+					std::string Title(NewClient.information);
+					auto pos = Title.find("\"alias\"");
+					if (pos != std::string::npos)
+					{
+						Title.erase(0, pos);
+						Title.erase(Title.find_first_of(",}"));	// truncate value
+						Title.erase(0, Title.find(':'));	// move past key value
+						Title.erase(Title.find(':'), 1);	// move past seperator
+						Title.erase(Title.find('"'), 1);
+						Title.erase(Title.find('"'), 1);
+						KasaTitles.insert(std::pair<std::string, std::string>(NewClient.GetDeviceID(), Title));
+					}
+
+
 					if (ClientResponse.find("\"children\":[") != std::string::npos)
 					{
 						const std::string ssParentID(NewClient.GetDeviceID());
@@ -696,6 +1563,19 @@ int main(int argc, char **argv)
 										if (ret.first->second.empty())
 											std::cout << "[" << getTimeISO8601() << "] adding (" << ClientHostname << ")" << ssChild << std::endl;
 									ssChild.clear();	// http://www.cplusplus.com/reference/string/basic_string/clear/
+									// This adds reported alias information to the TitleMap
+									std::string Title(NewClient.information);
+									auto pos = Title.find("\"alias\"");
+									if (pos != std::string::npos)
+									{
+										Title.erase(0, pos);
+										Title.erase(Title.find_first_of(",}"));	// truncate value
+										Title.erase(0, Title.find(':'));	// move past key value
+										Title.erase(Title.find(':'), 1);	// move past seperator
+										Title.erase(Title.find('"'), 1);
+										Title.erase(Title.find('"'), 1);
+										KasaTitles.insert(std::pair<std::string, std::string>(NewClient.GetDeviceID(), Title));
+									}
 								}
 							}
 						}
@@ -752,9 +1632,7 @@ int main(int argc, char **argv)
 									(Client.information.find("\"id\"") != std::string::npos))
 								{
 									// Need to build string in the format of: '{"emeter":{"get_realtime":{}},"context":{"child_ids":["8006842B55612405D20D69504A3F43DA1B2A969406"]}}'
-									ssRequest = "{\"emeter\":{\"get_realtime\":{}},\"context\":{\"child_ids\":[\"";
-									ssRequest += Client.GetDeviceID();
-									ssRequest += "\"]}}";
+									ssRequest = "{\"emeter\":{\"get_realtime\":{}},\"context\":{\"child_ids\":[\"" + Client.GetDeviceID() + "\"]}}";
 								}
 								uint8_t OutBuffer[1024 * 2] = { 0 };
 								KasaEncrypt(ssRequest, OutBuffer + sizeof(uint32_t));
@@ -785,6 +1663,9 @@ int main(int argc, char **argv)
 											it->second.push(LogLine.str());
 											if (ConsoleVerbosity > 0)
 												std::cout << " <=(" << nRet << ") " << Response;
+											CKASAReading theReading(LogLine.str());
+											if (theReading.IsValid())
+												UpdateMRTGData(theReading.GetDeviceID(), theReading);
 										}
 										else
 											bRun = false; // This is a hack. I'm exiting the program on this issue and counting on systemd to restart me
@@ -820,7 +1701,13 @@ int main(int argc, char **argv)
 			LastLogTime = CurrentTime;
 			GenerateLogFile(KasaClients);
 		}
-			
+
+		if ((!SVGDirectory.empty()) && (difftime(CurrentTime, TimeSVG) > DAY_SAMPLE))
+		{
+			WriteAllSVG();
+			TimeSVG = (CurrentTime / DAY_SAMPLE) * DAY_SAMPLE; // hack to try to line up TimeSVG to be on a five minute period
+		}
+
 		usleep(100); // sleep for 100 microseconds (0.1 ms)
 		if (ConsoleVerbosity > 0)
 			if (difftime(CurrentTime, DisplayTime) > 0) // update display if it's been over a second
@@ -829,7 +1716,8 @@ int main(int argc, char **argv)
 			std::cout << "[" << getTimeISO8601() << "]\r";
 			std::cout.flush();
 		}
-
+		if (difftime(CurrentTime, StartTime) > RunTime)
+			bRun = false;
 	}
 
 	GenerateLogFile(KasaClients);

@@ -1,20 +1,28 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 15
-VisualStudioVersion = 15.0.28307.1209
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31129.286
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KasaEnergyLogger", "KasaEnergyLogger.vcxproj", "{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM = Debug|ARM
+		Debug|x86 = Debug|x86
 		Release|ARM = Release|ARM
+		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Debug|ARM.ActiveCfg = Debug|ARM
 		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Debug|ARM.Build.0 = Debug|ARM
+		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Debug|x86.ActiveCfg = Debug|x86
+		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Debug|x86.Build.0 = Debug|x86
+		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Debug|x86.Deploy.0 = Debug|x86
 		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Release|ARM.ActiveCfg = Release|ARM
 		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Release|ARM.Build.0 = Release|ARM
+		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Release|x86.ActiveCfg = Release|x86
+		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Release|x86.Build.0 = Release|x86
+		{F72002F2-EBD2-47CB-BEF4-C6DED6845D74}.Release|x86.Deploy.0 = Release|x86
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
