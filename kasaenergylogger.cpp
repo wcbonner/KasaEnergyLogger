@@ -66,7 +66,7 @@
 // https://github.com/jamesbarnett91/tplink-energy-monitor
 // https://github.com/python-kasa/python-kasa
 /////////////////////////////////////////////////////////////////////////////
-static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210428-2 Built on: " __DATE__ " at " __TIME__);
+static const std::string ProgramVersionString("KasaEnergyLogger Version 2.20210428-3 Built on: " __DATE__ " at " __TIME__);
 /////////////////////////////////////////////////////////////////////////////
 std::string timeToISO8601(const time_t & TheTime)
 {
@@ -639,32 +639,35 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				tempOString = std::ostringstream();
 				tempOString << "Amps (" << std::setprecision(2) << TheValues[0].GetAmps() << ")";
 				std::string YLegendAmps(tempOString.str());
+				double TotalWHMin = DBL_MAX;
+				double TotalWHMax = DBL_MIN;
+				for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
+				{
+					TotalWHMin = std::min(TotalWHMin, TheValues[index].GetTotalWattHours());
+					TotalWHMax = std::max(TotalWHMax, TheValues[index].GetTotalWattHours());
+				}
 				tempOString = std::ostringstream();
-				tempOString << "Total WH (" << TheValues[0].GetTotalWattHours() << ")";
+				tempOString << "Total WH (" << TotalWHMin << " - " << TotalWHMax << ")";
 				std::string YLegendTotalWH(tempOString.str());
 				int GraphTop = FontSize + TickSize;
 				int GraphBottom = SVGHeight - GraphTop;
 				int GraphRight = SVGWidth - (GraphTop * 2) - 2;
 				int GraphLeft = GraphRight - GraphWidth;
 				int GraphVerticalDivision = (GraphBottom - GraphTop) / 4;
-				double WattsMin = DBL_MAX;
+				double WattsMin = 0;
 				double WattsMax = DBL_MIN;
-				double AmpsMin = DBL_MAX;
+				double AmpsMin = 0;
 				double AmpsMax = DBL_MIN;
 				if (MinMax)
 					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
 					{
-						WattsMin = std::min(WattsMin, TheValues[index].GetWattsMin());
 						WattsMax = std::max(WattsMax, TheValues[index].GetWattsMax());
-						AmpsMin = std::min(AmpsMin, TheValues[index].GetAmpsMin());
 						AmpsMax = std::max(AmpsMax, TheValues[index].GetAmpsMax());
 					}
 				else
 					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
 					{
-						WattsMin = std::min(WattsMin, TheValues[index].GetWatts());
 						WattsMax = std::max(WattsMax, TheValues[index].GetWatts());
-						AmpsMin = std::min(AmpsMin, TheValues[index].GetAmps());
 						AmpsMax = std::max(AmpsMax, TheValues[index].GetAmps());
 					}
 				// These next two checks are to make sure the virtical factor doesn't skyrocket to rediculous proportions.
@@ -843,13 +846,6 @@ void WriteSVG(std::vector<CKASAReading>& TheValues, const std::string& SVGFileNa
 				if (DrawTotalWH)
 				{
 					SVGFile << "\t<!-- TotalWH -->" << std::endl;
-					double TotalWHMin = DBL_MAX;
-					double TotalWHMax = DBL_MIN;
-					for (auto index = 0; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
-					{
-						TotalWHMin = std::min(TotalWHMin, TheValues[index].GetTotalWattHours());
-						TotalWHMax = std::max(TotalWHMax, TheValues[index].GetTotalWattHours());
-					}
 					double TotalWHVerticalFactor = (GraphBottom - GraphTop) / (TotalWHMax - TotalWHMin);
 					SVGFile << "\t<polyline style=\"fill:none;stroke:OrangeRed\" points=\"";
 					for (auto index = 1; index < (GraphWidth < TheValues.size() ? GraphWidth : TheValues.size()); index++)
