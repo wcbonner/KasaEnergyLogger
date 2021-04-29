@@ -15,3 +15,6 @@
 /bin/ARM/Debug
 /KasaEnergyLogger/usr/local/bin/kasaenergylogger
 /KasaEnergyLogger.deb
+/bin/x86
+/obj/x86
+/SVG
