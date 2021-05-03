@@ -80,6 +80,7 @@
     <ClCompile Include="kasaenergylogger.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="kasa-80063919963044CFCE2CD1D5402824851D59EB3800-day.svg" />
     <None Include="KasaEnergyLogger\DEBIAN\control" />
     <None Include="KasaEnergyLogger\DEBIAN\postinst" />
     <None Include="KasaEnergyLogger\DEBIAN\postrm" />
