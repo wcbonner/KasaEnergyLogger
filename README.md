@@ -21,18 +21,18 @@ As of May 2021 the software supports direct output of SVG graphs displaying the 
 ![Image](./kasa-80063919963044CFCE2CD1D5402824851D59EB3800-day.svg)
 
 ## Usage
-  KasaEnergyLogger Version 2.20210429-2 Built on: Apr 29 2021 at 09:09:20
-  Options:
-    -h | --help          Print this message
-    -l | --log name      Logging Directory [./]
-    -t | --time seconds  time between log file writes [60]
-    -v | --verbose level stdout verbosity level [1]
-    -r | --runtime seconds time to run before quitting [2147483647]
-    -m | --mrtg 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D Get last value for this deviceId
-    -a | --average minutes [5]
-    -s | --svg name      SVG output directory
-    -x | --minmax graph  Draw the minimum and maximum temperature and humidity status on SVG graphs. 1:daily, 2:weekly, 4:monthly, 8:yearly
-    -w | --watthour graph Display the total watt hours on SVG graphs. 1:daily, 2:weekly, 4:monthly, 8:yearly
+    KasaEnergyLogger Version 2.20210503-1 Built on: May  3 2021 at 12:33:25
+    Options:
+      -h | --help          Print this message
+      -l | --log name      Logging Directory [./]
+      -t | --time seconds  time between log file writes [60]
+      -v | --verbose level stdout verbosity level [1]
+      -r | --runtime seconds time to run before quitting [2147483647]
+      -m | --mrtg 8006D28F7D6C1FC75E7254E4D10B1D1219A9B81D Get last value for this deviceId
+      -a | --average minutes [5]
+      -s | --svg name      SVG output directory
+      -x | --minmax graph  Draw the minimum and maximum temperature and humidity status on SVG graphs. 1:daily, 2:weekly, 4:monthly, 8:yearly
+      -w | --watthour graph Display the total watt hours on SVG graphs. 1:daily, 2:weekly, 4:monthly, 8:yearly
 
 ## Runtime Option
 I was having a problem with the program failing to respond after an extended period of running. I've not yet found the issue, but I introduced a workaround when running as a service. The --runtime option tells the program to exit after a specified number of seconds. The service command file is configured to always attempt to restart the program, and passes the runtime parameter of 43200 seconds, which works out to 12 hours. 
